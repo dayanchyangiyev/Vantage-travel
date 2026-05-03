@@ -5,15 +5,19 @@
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plane, ChevronRight, ArrowLeft, MoreHorizontal } from 'lucide-react';
+import { Plane, ChevronRight, ArrowLeft, MoreHorizontal, User as UserIcon, LogOut } from 'lucide-react';
 import { TripInput, TripPlan } from './types/trip';
 import { generateTripPlan } from './lib/gemini';
 import TripForm from './components/TripForm';
 import Dashboard from './components/Dashboard';
+import Login from './components/Login';
+import Register from './components/Register';
+import { useAuth } from './context/AuthContext';
 
 export default function App() {
-  const [step, setStep] = useState<'landing' | 'form' | 'loading' | 'dashboard'>('landing');
+  const [step, setStep] = useState<'landing' | 'login' | 'register' | 'form' | 'loading' | 'dashboard'>('landing');
   const [tripPlan, setTripPlan] = useState<TripPlan | null>(null);
+  const { isAuthenticated, user, logout } = useAuth();
 
   const handleStartTrip = (input: TripInput) => {
     setStep('loading');
@@ -37,6 +41,36 @@ export default function App() {
             exit={{ opacity: 0 }}
             className="flex flex-col items-center justify-center min-h-screen px-6 text-center"
           >
+            <motion.div
+              initial={{ y: 10, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.1 }}
+              className="absolute top-8 right-8 flex gap-4"
+            >
+              {isAuthenticated ? (
+                <div className="flex items-center gap-4">
+                  <span className="text-sm font-medium text-zinc-600 flex items-center gap-2">
+                    <UserIcon className="w-4 h-4" />
+                    {user?.username}
+                  </span>
+                  <button
+                    onClick={() => logout()}
+                    className="text-xs uppercase tracking-widest font-medium text-zinc-400 hover:text-zinc-900 transition-colors flex items-center gap-2"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Logout
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setStep('login')}
+                  className="text-xs uppercase tracking-widest font-medium text-zinc-500 hover:text-zinc-900 transition-colors"
+                >
+                  Sign In
+                </button>
+              )}
+            </motion.div>
+
             <motion.div
               initial={{ y: 10, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
@@ -110,6 +144,38 @@ export default function App() {
               className="w-48 h-[1px] bg-zinc-900 mb-6"
             />
             <h2 className="text-xs uppercase tracking-[0.4em] font-light text-zinc-400">Processing Requirements</h2>
+          </motion.div>
+        )}
+
+        {step === 'login' && (
+          <motion.div
+            key="login"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex items-center justify-center min-h-screen px-6 py-24"
+          >
+            <Login
+              onBack={() => setStep('landing')}
+              onSuccess={() => setStep('landing')}
+              onNavigateRegister={() => setStep('register')}
+            />
+          </motion.div>
+        )}
+
+        {step === 'register' && (
+          <motion.div
+            key="register"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex items-center justify-center min-h-screen px-6 py-24"
+          >
+            <Register
+              onBack={() => setStep('landing')}
+              onSuccess={() => setStep('login')}
+              onNavigateLogin={() => setStep('login')}
+            />
           </motion.div>
         )}
 

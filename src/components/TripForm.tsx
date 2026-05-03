@@ -47,7 +47,7 @@ export default function TripForm({ onSubmit, initialData }: TripFormProps) {
               id="origin-country-input"
               type="destination"
               value={formData.originCountry || ''}
-              placeholder="City or country of departure"
+              placeholder="Major city of departure"
               onChange={(val) => setFormData({ ...formData, originCountry: val })}
             />
           </div>
@@ -57,7 +57,7 @@ export default function TripForm({ onSubmit, initialData }: TripFormProps) {
               id="destination-input"
               type="destination"
               value={formData.destination || ''}
-              placeholder="Country or city to visit"
+              placeholder="Major destination city"
               onChange={(val) => setFormData({ ...formData, destination: val })}
             />
           </div>
@@ -147,7 +147,7 @@ export default function TripForm({ onSubmit, initialData }: TripFormProps) {
       <div className="mt-12">
         <button
           id="confirm-trip-btn"
-          disabled={!formData.originCountry || !formData.originCity || !formData.destination || !formData.startDate || !formData.endDate}
+          disabled={!formData.originCountry || !formData.destination || !formData.startDate || !formData.endDate}
           onClick={() => onSubmit(formData as TripInput)}
           className="w-full py-6 bg-zinc-950 text-white font-medium uppercase tracking-[0.3em] text-xs disabled:opacity-20 transition-all hover:bg-zinc-800"
         >

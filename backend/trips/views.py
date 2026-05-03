@@ -13,6 +13,37 @@ from .models import Trip
 from .serializers import TripSerializer
 
 
+def _filter_destination_results(geonames):
+    """
+    Keep search results useful without forcing a hardcoded fallback list.
+    - Prefer capitals/admin cities (PPLC/PPLA/PPLA2)
+    - Include cities (PPL) above a minimum population
+    - Dedupe by geonameId
+    """
+    min_population = 30000
+    kept = []
+    seen = set()
+
+    for place in geonames:
+        geoname_id = place.get("geonameId")
+        if geoname_id in seen:
+            continue
+
+        code = place.get("fcode")
+        population = int(place.get("population") or 0)
+        is_admin_city = code in {"PPLC", "PPLA", "PPLA2"}
+        is_populated_city = code == "PPL" and population >= min_population
+
+        if is_admin_city or is_populated_city:
+            kept.append(place)
+            seen.add(geoname_id)
+
+        if len(kept) >= 8:
+            break
+
+    return kept
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def geonames_search(request):
@@ -24,7 +55,7 @@ def geonames_search(request):
 
     params = {
         'q': query,
-        'maxRows': '8',
+        'maxRows': '50',
         'username': settings.GEONAMES_USERNAME,
         'lang': 'en',
         'style': 'MEDIUM',
@@ -42,6 +73,12 @@ def geonames_search(request):
     try:
         with urllib.request.urlopen(url, timeout=5) as resp:
             data = json.loads(resp.read().decode('utf-8'))
+
+        # Filter destination results to practical city choices without hardcoded fallbacks.
+        if search_type != 'country':
+            filtered = _filter_destination_results(data.get('geonames', []))
+            data['geonames'] = filtered if filtered else data.get('geonames', [])[:8]
+
         return Response(data)
     except Exception:
         return Response({'geonames': []})

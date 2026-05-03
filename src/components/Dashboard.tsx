@@ -47,10 +47,6 @@ export default function Dashboard({
                 <span className="text-zinc-900">{savedTrip.origin_country}</span>
               </div>
               <div>
-                <span className="block text-zinc-400 text-[11px] uppercase tracking-wider mb-1">Departure City</span>
-                <span className="text-zinc-900">{savedTrip.origin_city || '—'}</span>
-              </div>
-              <div>
                 <span className="block text-zinc-400 text-[11px] uppercase tracking-wider mb-1">Destination</span>
                 <span className="text-zinc-900">{savedTrip.destination}</span>
               </div>

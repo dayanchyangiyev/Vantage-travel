@@ -1,13 +1,19 @@
 import { motion } from 'motion/react';
 import { 
   ArrowLeft,
-  ChevronRight,
   MoreHorizontal,
-  Circle
 } from 'lucide-react';
-import { TripPlan } from '../types/trip';
+import { SavedTrip, TripPlan } from '../types/trip';
 
-export default function Dashboard({ plan, onBack }: { plan: TripPlan; onBack: () => void }) {
+export default function Dashboard({
+  plan,
+  savedTrip,
+  onBack,
+}: {
+  plan: TripPlan;
+  savedTrip: SavedTrip | null;
+  onBack: () => void;
+}) {
   return (
     <div className="max-w-6xl mx-auto px-6 py-20 bg-white">
       {/* Navigation Header */}
@@ -30,6 +36,43 @@ export default function Dashboard({ plan, onBack }: { plan: TripPlan; onBack: ()
           Architectural <br />Summary.
         </h1>
         <div className="w-24 h-px bg-zinc-950" />
+        {savedTrip && (
+          <div className="mt-10 border border-zinc-100 bg-zinc-50/70 p-6">
+            <p className="text-[10px] uppercase tracking-[0.25em] font-semibold text-zinc-400 mb-5">
+              Saved Travel Preferences
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+              <div>
+                <span className="block text-zinc-400 text-[11px] uppercase tracking-wider mb-1">Origin</span>
+                <span className="text-zinc-900">{savedTrip.origin_country}</span>
+              </div>
+              <div>
+                <span className="block text-zinc-400 text-[11px] uppercase tracking-wider mb-1">Destination</span>
+                <span className="text-zinc-900">{savedTrip.destination}</span>
+              </div>
+              <div>
+                <span className="block text-zinc-400 text-[11px] uppercase tracking-wider mb-1">Travelers</span>
+                <span className="text-zinc-900">{savedTrip.travelers}</span>
+              </div>
+              <div>
+                <span className="block text-zinc-400 text-[11px] uppercase tracking-wider mb-1">Dates</span>
+                <span className="text-zinc-900">{savedTrip.start_date} → {savedTrip.end_date}</span>
+              </div>
+              <div>
+                <span className="block text-zinc-400 text-[11px] uppercase tracking-wider mb-1">Budget</span>
+                <span className="text-zinc-900 uppercase">{savedTrip.budget_profile}</span>
+              </div>
+              <div>
+                <span className="block text-zinc-400 text-[11px] uppercase tracking-wider mb-1">Interests</span>
+                <span className="text-zinc-900">
+                  {(savedTrip.interests || []).length
+                    ? savedTrip.interests.join(', ')
+                    : 'None selected'}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-y-24 gap-x-12">

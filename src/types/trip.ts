@@ -1,10 +1,26 @@
 export interface TripInput {
+  originCountry: string;
   destination: string;
   budget: 'cheapest' | 'affordable' | 'moderate' | 'luxury';
   travelers: number;
   startDate: string;
   endDate: string;
   interests: string[];
+}
+
+export interface SavedTrip {
+  id: number;
+  user: number;
+  origin_country: string;
+  destination: string;
+  travelers: number;
+  start_date: string;
+  end_date: string;
+  budget_profile: 'cheapest' | 'affordable' | 'moderate' | 'luxury';
+  interests: string[];
+  engine_output: TripPlan;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface TicketInfo {

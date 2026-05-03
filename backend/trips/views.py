@@ -50,7 +50,7 @@ def geonames_search(request):
     query = request.GET.get('q', '').strip()
     search_type = request.GET.get('type', 'destination')
 
-    if len(query) < 2:
+    if len(query) < 2 or not settings.GEONAMES_USERNAME:
         return Response({'geonames': []})
 
     params = {

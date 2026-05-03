@@ -29,10 +29,7 @@ config = AutoConfig(search_path=str(ENV_DIR))
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = config(
-    "DJANGO_SECRET_KEY",
-    default="django-insecure-s+&^96=azx8a^39sn^%$l&$k@a6b7=(^5w6ds&wpy#dh%ofn_k",
-)
+SECRET_KEY = config("DJANGO_SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config("DJANGO_DEBUG", default=True, cast=bool)
@@ -184,4 +181,4 @@ CORS_ALLOWED_ORIGINS = config(
 CORS_ALLOW_ALL_ORIGINS = config("CORS_ALLOW_ALL_ORIGINS", default=True, cast=bool)
 
 GOOGLE_MAPS_API_KEY = config("GOOGLE_MAPS_API_KEY", default="")
-GEONAMES_USERNAME = config("GEONAMES_USERNAME", default="akmuhammet")
+GEONAMES_USERNAME = config("GEONAMES_USERNAME", default="")

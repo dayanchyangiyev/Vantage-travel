@@ -169,3 +169,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
 ]
 CORS_ALLOW_ALL_ORIGINS = True
+import os
+
+GOOGLE_MAPS_API_KEY = os.getenv("AIzaSyDSO-oU91wi3hHmwsGsN4L0nme7yXeA_H4")
+
+GEONAMES_USERNAME = 'akmuhammet'

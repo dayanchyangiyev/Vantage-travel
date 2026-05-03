@@ -4,3 +4,4 @@ Phase2_Documentation.md
 db.sqlite3
 *.pyc
 __pycache__/
+dist

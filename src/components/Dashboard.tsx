@@ -43,7 +43,7 @@ export default function Dashboard({
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
               <div>
-                <span className="block text-zinc-400 text-[11px] uppercase tracking-wider mb-1">Origin</span>
+                <span className="block text-zinc-400 text-[11px] uppercase tracking-wider mb-1">Origin Country</span>
                 <span className="text-zinc-900">{savedTrip.origin_country}</span>
               </div>
               <div>

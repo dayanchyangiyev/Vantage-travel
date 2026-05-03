@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'motion/react';
 import { TripInput } from '../types/trip';
+import GeoAutocomplete from './GeoAutocomplete';
 
 const INTERESTS = ['Food', 'Art', 'History', 'Nature', 'Nightlife', 'Shopping', 'Adventure'];
 
@@ -41,25 +42,23 @@ export default function TripForm({ onSubmit, initialData }: TripFormProps) {
       <div className="grid grid-cols-1 gap-16">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
           <div className="space-y-4">
-            <label className="text-[10px] uppercase tracking-widest font-semibold text-zinc-400">Origin Country</label>
-            <input
+            <label className="text-[10px] uppercase tracking-widest font-semibold text-zinc-400">Departure</label>
+            <GeoAutocomplete
               id="origin-country-input"
-              type="text"
+              type="destination"
               value={formData.originCountry || ''}
-              placeholder="Country of departure"
-              className="w-full bg-transparent border-b border-zinc-200 py-6 text-2xl focus:border-zinc-950 outline-none transition-colors placeholder:text-zinc-200 font-light"
-              onChange={(e) => setFormData({ ...formData, originCountry: e.target.value })}
+              placeholder="Major city of departure"
+              onChange={(val) => setFormData({ ...formData, originCountry: val })}
             />
           </div>
           <div className="space-y-4">
-            <label className="text-[10px] uppercase tracking-widest font-semibold text-zinc-400">Destination Country</label>
-            <input
+            <label className="text-[10px] uppercase tracking-widest font-semibold text-zinc-400">Destination</label>
+            <GeoAutocomplete
               id="destination-input"
-              type="text"
+              type="destination"
               value={formData.destination || ''}
-              placeholder="Country or city to visit"
-              className="w-full bg-transparent border-b border-zinc-200 py-6 text-2xl focus:border-zinc-950 outline-none transition-colors placeholder:text-zinc-200 font-light"
-              onChange={(e) => setFormData({ ...formData, destination: e.target.value })}
+              placeholder="Major destination city"
+              onChange={(val) => setFormData({ ...formData, destination: val })}
             />
           </div>
         </div>

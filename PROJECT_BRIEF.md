@@ -283,7 +283,7 @@ The following are load-bearing parts of the architecture. Do not modify, refacto
 | `_map_values_to_tiers()` logic | Core pricing algorithm used everywhere |
 | `AuthContext.tsx` interface | `useAuth()` is called in Login, App, and future components |
 | `src/types/trip.ts` interfaces | TypeScript compile safety across the entire frontend |
-| `unit_tests/` directory | Tests must stay passing — run them after any change |
+| `backend/unit_tests/` and `frontend/unit_tests/` | Tests must stay passing — run them after any change |
 | `databases/` path in `settings.py` | Database file location is referenced in `settings.py` and `.gitignore` |
 | `.env/.env` structure | All env var names are referenced in `settings.py` via `decouple` |
 | `log_api_response()` call sites | Removing them loses the audit trail silently |
@@ -299,7 +299,7 @@ Follow these rules in order for every new feature:
 2. Add the business logic function to `services.py` — it receives a typed dataclass, returns a typed dict
 3. Add the view to `views.py` — it validates input with the serializer, calls the service, returns Response
 4. Register the URL in `trips/urls.py`
-5. Write unit tests in `unit_tests/backend/` — mock all external calls
+5. Write unit tests in `backend/unit_tests/` — mock all external calls
 
 ### Adding a new external data source
 1. Create a new `XxxProvider` class in `services.py`
@@ -307,7 +307,7 @@ Follow these rules in order for every new feature:
 3. Use `SerpApiClient` (or a new equivalent) for the HTTP call — never use `requests` directly
 4. Call `log_api_response()` after every HTTP call
 5. Wire the new provider into `build_dynamic_tier_quotes()` if it contributes to trip pricing
-6. Write tests in `unit_tests/backend/test_services_xxx.py` — mock the HTTP layer
+6. Write tests in `backend/unit_tests/test_services_xxx.py` — mock the HTTP layer
 
 ### Adding a new frontend screen
 1. Create `src/components/NewScreen.tsx`
@@ -315,7 +315,7 @@ Follow these rules in order for every new feature:
 3. Add the render block: `{step === "new-screen" && <NewScreen onBack={() => setStep("...")} />}`
 4. If it needs an API call, add a function in `src/lib/` first
 5. If it needs auth state, use `useAuth()` — never pass token as a prop
-6. Write a test in `unit_tests/frontend/NewScreen.test.tsx`
+6. Write a test in `frontend/unit_tests/NewScreen.test.tsx`
 
 ### Adding a new pricing tier or modifying tiers
 > ⚠️ The four tiers (`cheapest`, `affordable`, `moderate`, `luxury`) are hardcoded throughout the backend and frontend. Changing them requires updating: `_map_values_to_tiers()`, all TypeScript interfaces in `types/trip.ts`, and `Dashboard.tsx`. This is a large change — proceed carefully.
@@ -370,7 +370,7 @@ GOOGLE_PLACES_API_KEY=<your-places-key>
 ### Run backend tests (164 total — 142 backend, 22 frontend)
 ```bash
 source venv/bin/activate
-cd backend && python -m pytest ../unit_tests/backend/ -v
+cd backend && python -m pytest unit_tests/ -v
 ```
 
 ### Run frontend tests
@@ -382,9 +382,9 @@ npm run test
 - **All external HTTP calls must be mocked** — never call real APIs in tests
 - Backend: use `mocker.patch("trips.services.XxxProvider.fetch_tier_prices", return_value={...})`
 - Frontend: use `vi.stubGlobal('fetch', vi.fn().mockResolvedValue({...}))`
-- Use `unit_tests/backend/conftest.py` fixtures: `api_client`, `auth_client`, `test_user`
+- Use `backend/unit_tests/conftest.py` fixtures: `api_client`, `auth_client`, `test_user`
 - Test settings (`backend/backend/test_settings.py`) use in-memory SQLite and a fixed secret key — no `.env` needed to run tests
-- New test files go in `unit_tests/backend/` or `unit_tests/frontend/` — never in the app directories
+- New test files go in `backend/unit_tests/` or `frontend/unit_tests/` — never in the app directories
 
 ---
 

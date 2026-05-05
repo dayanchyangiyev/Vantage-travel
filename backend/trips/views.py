@@ -169,7 +169,7 @@ class TripListCreateView(generics.ListCreateAPIView):
     permission_classes = (IsAuthenticated,)
 
     def get_queryset(self):
-        return Trip.objects.filter(user=self.request.user).order_by("-created_at")
+        return Trip.objects.filter(user=self.request.user)
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
@@ -182,7 +182,6 @@ class CurrentTripView(generics.RetrieveAPIView):
     def get_object(self):
         trip = (
             Trip.objects.filter(user=self.request.user)
-            .order_by("-created_at")
             .first()
         )
         if trip is None:

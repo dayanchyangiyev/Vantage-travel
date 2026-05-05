@@ -193,3 +193,10 @@ GOOGLE_PLACES_TEXT_SEARCH_URL = config(
     default="https://places.googleapis.com/v1/places:searchText",
 )
 GOOGLE_PLACES_API_KEY = config("GOOGLE_PLACES_API_KEY", default="")
+
+# Google Weather API — set GOOGLE_WEATHER_API_KEY in .env/.env to activate.
+GOOGLE_WEATHER_API_KEY = config("GOOGLE_WEATHER_API_KEY", default="")
+GOOGLE_WEATHER_BASE_URL = config(
+    "GOOGLE_WEATHER_BASE_URL",
+    default="https://weather.googleapis.com/v1/forecast/days:lookup",
+)

@@ -82,3 +82,10 @@ class BudgetEvaluationInputSerializer(serializers.Serializer):
     total_living_budget = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"))
     comfort_preference = serializers.ChoiceField(choices=sorted(VALID_COMFORT_TIERS))
     currency = serializers.CharField(required=False, default="USD")
+
+
+class WeatherQuerySerializer(serializers.Serializer):
+    destination_city = serializers.CharField()
+    destination_country = serializers.CharField()
+    start_date = serializers.DateField(required=False, allow_null=True)
+    end_date = serializers.DateField(required=False, allow_null=True)

@@ -6,9 +6,9 @@ export async function generateTripPlan(input: TripInput): Promise<TripPlan> {
     setTimeout(() => {
       resolve({
         bestTimeToTravel: {
-          period: "September - October",
+          period: "",
           reason: "Mild temperatures and fewer crowds make this the optimal window for exploration.",
-          weather: "22°C Clear",
+          weather: "",
           touristDensity: "low",
         },
         tickets: [

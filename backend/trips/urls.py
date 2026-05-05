@@ -4,6 +4,7 @@ from .views import (
     CurrentTripView,
     TripListCreateView,
     budget_country_tiers,
+    destination_weather,
     evaluate_budget,
     geonames_search,
 )
@@ -14,4 +15,5 @@ urlpatterns = [
     path("geonames/", geonames_search, name="geonames-search"),
     path("budget/tiers/", budget_country_tiers, name="budget-country-tiers"),
     path("budget/evaluate/", evaluate_budget, name="budget-evaluate"),
+    path("weather/", destination_weather, name="destination-weather"),
 ]

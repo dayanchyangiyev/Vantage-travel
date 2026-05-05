@@ -749,6 +749,176 @@ class LocalCostProvider:
         return ordered
 
 
+class GoogleWeatherProvider:
+    def __init__(self):
+        self.api_key = getattr(settings, "GOOGLE_WEATHER_API_KEY", "")
+        self.base_url = getattr(
+            settings,
+            "GOOGLE_WEATHER_BASE_URL",
+            "https://weather.googleapis.com/v1/forecast/days:lookup",
+        )
+        self.geonames_username = getattr(settings, "GEONAMES_USERNAME", "")
+
+    def _geocode(self, city: str, country: str) -> tuple[float, float]:
+        if not self.geonames_username:
+            raise ValueError("GEONAMES_USERNAME is required for weather geocoding.")
+        data = _http_request_json(
+            "GET",
+            "https://secure.geonames.org/searchJSON",
+            params={
+                "q": f"{city}, {country}",
+                "maxRows": "1",
+                "username": self.geonames_username,
+                "lang": "en",
+                "style": "SHORT",
+                "featureClass": "P",
+            },
+        )
+        places = data.get("geonames", [])
+        if not places:
+            raise ValueError(f"Cannot geocode '{city}, {country}'.")
+        return float(places[0]["lat"]), float(places[0]["lng"])
+
+    def fetch_summary(
+        self,
+        destination_city: str,
+        destination_country: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> Dict[str, Any]:
+        if not self.api_key:
+            raise ValueError("GOOGLE_WEATHER_API_KEY is missing.")
+
+        lat, lng = self._geocode(destination_city, destination_country)
+
+        today = date.today()
+        trip_start = _parse_date(start_date) if start_date else None
+        trip_end = _parse_date(end_date) if end_date else None
+
+        days_until_trip = (trip_start - today).days if trip_start else 0
+        within_forecast = bool(trip_start and 0 <= days_until_trip < 10)
+
+        data = _http_request_json(
+            "GET",
+            self.base_url,
+            params={
+                "location.latitude": lat,
+                "location.longitude": lng,
+                "days": 10,
+                "key": self.api_key,
+            },
+        )
+
+        all_days = data.get("forecastDays", [])
+        if not all_days:
+            raise ValueError("Google Weather API returned no forecast data.")
+
+        # Use only the days that fall within the trip window when in range.
+        days_to_parse = all_days
+        if within_forecast and trip_start and trip_end:
+            filtered = [
+                d for d in all_days
+                if self._day_in_range(d.get("displayDate", {}), trip_start, trip_end)
+            ]
+            if filtered:
+                days_to_parse = filtered
+
+        if trip_start and trip_end:
+            if within_forecast:
+                date_label = (
+                    f"Forecast for your trip"
+                    f" ({trip_start.strftime('%b %d')} – {trip_end.strftime('%b %d')})"
+                )
+            else:
+                date_label = (
+                    f"Current conditions"
+                    f" (seasonal reference for {trip_start.strftime('%B')})"
+                )
+        else:
+            date_label = "Current 10-day forecast"
+
+        result = self._parse({"forecastDays": days_to_parse})
+        result["date_label"] = date_label
+        result["is_forecast"] = within_forecast
+        return result
+
+    @staticmethod
+    def _day_in_range(d: Dict[str, Any], start: date, end: date) -> bool:
+        try:
+            return start <= date(d["year"], d["month"], d["day"]) <= end
+        except (KeyError, TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _parse(data: Dict[str, Any]) -> Dict[str, Any]:
+        days = data.get("forecastDays", [])
+        if not days:
+            raise ValueError("Google Weather API returned no forecast data.")
+
+        max_temps: List[float] = []
+        min_temps: List[float] = []
+        humidities: List[int] = []
+        precip_probs: List[int] = []
+        conditions: List[str] = []
+
+        for day in days:
+            t_max = day.get("maxTemperature", {}).get("degrees")
+            t_min = day.get("minTemperature", {}).get("degrees")
+            if t_max is not None:
+                max_temps.append(float(t_max))
+            if t_min is not None:
+                min_temps.append(float(t_min))
+
+            day_fc = day.get("daytimeForecast", {})
+            # relativeHumidity is a direct field on daytimeForecast in the
+            # Google Weather API — not nested under a "humidity" sub-object.
+            h = day_fc.get("relativeHumidity") or day_fc.get("humidity", {}).get("relativeHumidity")
+            if h is not None:
+                humidities.append(int(h))
+
+            p = day_fc.get("precipitation", {}).get("probability", {}).get("percent")
+            if p is not None:
+                precip_probs.append(int(p))
+
+            # Condition text may be on daytimeForecast or directly on the day.
+            cond = (
+                day_fc.get("weatherCondition", {}).get("description", {}).get("text")
+                or day.get("daySummary")
+            )
+            if cond:
+                conditions.append(cond)
+
+        avg_high = round(sum(max_temps) / len(max_temps), 1) if max_temps else 0.0
+        avg_low = round(sum(min_temps) / len(min_temps), 1) if min_temps else 0.0
+        avg_humidity = round(sum(humidities) / len(humidities)) if humidities else 0
+        avg_precip = round(sum(precip_probs) / len(precip_probs)) if precip_probs else 0
+        condition = max(set(conditions), key=conditions.count) if conditions else "Varied"
+
+        def to_f(c: float) -> float:
+            return round(c * 9 / 5 + 32, 1)
+
+        return {
+            "condition": condition,
+            "high_c": avg_high,
+            "low_c": avg_low,
+            "high_f": to_f(avg_high),
+            "low_f": to_f(avg_low),
+            "humidity_pct": avg_humidity,
+            "precipitation_pct": avg_precip,
+        }
+
+
+def fetch_destination_weather(
+    destination_city: str,
+    destination_country: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> Dict[str, Any]:
+    return GoogleWeatherProvider().fetch_summary(
+        destination_city, destination_country, start_date, end_date
+    )
+
+
 def _normalize_duration_days(departure_date: str, return_date: str) -> int:
     departure = _parse_date(departure_date)
     returning = _parse_date(return_date)

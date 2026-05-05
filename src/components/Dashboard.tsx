@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
-import { ArrowLeft, MoreHorizontal, AlertTriangle, RefreshCw } from 'lucide-react';
+import { ArrowLeft, MoreHorizontal, AlertTriangle, RefreshCw, Sun, Cloud, CloudRain, Thermometer, Droplets } from 'lucide-react';
 import { motion } from 'motion/react';
-import { DynamicTierQuote, SavedTrip, TripPlan } from '../types/trip';
+import { DynamicTierQuote, SavedTrip, TripPlan, WeatherSummary } from '../types/trip';
 
 type TierKey = 'cheapest' | 'affordable' | 'moderate' | 'luxury';
 
@@ -128,21 +128,117 @@ function TripPlanSkeleton() {
 }
 
 // ---------------------------------------------------------------------------
+// WeatherSkeleton — loading placeholder for the weather widget
+// ---------------------------------------------------------------------------
+function WeatherSkeleton() {
+  return (
+    <div className="border border-zinc-100 p-6 space-y-5">
+      <div className="flex items-center justify-between">
+        <Skeleton className="h-5 w-32" />
+        <Skeleton className="h-3 w-16" />
+      </div>
+      <Skeleton className="h-3 w-full" />
+      <Skeleton className="h-4 w-3/4" />
+      <div className="flex gap-6">
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="h-3 w-20" />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WeatherWidget — general weather summary for the destination
+// ---------------------------------------------------------------------------
+function getWeatherIcon(condition: string) {
+  const c = condition.toLowerCase();
+  if (c.includes('rain') || c.includes('shower') || c.includes('drizzle')) return CloudRain;
+  if (c.includes('cloud') || c.includes('overcast')) return Cloud;
+  if (c.includes('sun') || c.includes('clear')) return Sun;
+  return Cloud;
+}
+
+function WeatherWidget({ summary }: { summary: WeatherSummary }) {
+  const Icon = getWeatherIcon(summary.condition);
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="border border-zinc-100 bg-zinc-50/50 p-6 space-y-5"
+    >
+      {/* Condition + forecast/reference badge */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Icon className="w-5 h-5 text-zinc-500 flex-shrink-0" />
+          <span className="text-sm font-light text-zinc-800">{summary.condition}</span>
+        </div>
+        <span className="text-[10px] uppercase tracking-widest text-zinc-300 font-bold shrink-0">
+          {summary.is_forecast ? 'Forecast' : 'Reference'}
+        </span>
+      </div>
+
+      {/* Date label — single line */}
+      <p className="text-xs text-zinc-400 font-light leading-none">{summary.date_label}</p>
+
+      {/* Temperature range low → high — single line */}
+      <div className="flex items-center gap-3">
+        <Thermometer className="w-4 h-4 text-zinc-300 flex-shrink-0" />
+        <span className="text-sm text-zinc-700 whitespace-nowrap">
+          {summary.low_c}°C – {summary.high_c}°C &nbsp;/&nbsp; {summary.low_f}°F – {summary.high_f}°F
+        </span>
+      </div>
+
+      {/* Humidity + rain — single line */}
+      <div className="flex items-center gap-6">
+        <div className="flex items-center gap-2">
+          <Droplets className="w-4 h-4 text-zinc-300 flex-shrink-0" />
+          <span className="text-xs text-zinc-500">
+            Humidity&nbsp;<span className="text-zinc-700 font-medium">{summary.humidity_pct}%</span>
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <CloudRain className="w-4 h-4 text-zinc-300 flex-shrink-0" />
+          <span className="text-xs text-zinc-500">
+            Rain&nbsp;<span className="text-zinc-700 font-medium">{summary.precipitation_pct}%</span>
+          </span>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Dashboard component
 // ---------------------------------------------------------------------------
+function formatDateRange(startDate: string, endDate: string): string {
+  const fmt = (d: string) =>
+    new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  const fmtYear = (d: string) =>
+    new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return `${fmt(startDate)} – ${fmtYear(endDate)}`;
+}
+
 export default function Dashboard({
   plan,
   savedTrip,
+  currentTripDates,
   pricingSnapshot,
   isPricingLoading,
   pricingError,
+  weatherSummary,
+  weatherError,
+  isWeatherLoading,
   onBack,
 }: {
   plan: TripPlan | null;
   savedTrip: SavedTrip | null;
+  currentTripDates: { startDate: string; endDate: string } | null;
   pricingSnapshot: DynamicTierQuote | null;
   isPricingLoading: boolean;
   pricingError: string | null;
+  weatherSummary: WeatherSummary | null;
+  weatherError: string | null;
+  isWeatherLoading: boolean;
   onBack: () => void;
 }) {
   const initialTier = (savedTrip?.budget_profile || 'moderate') as TierKey;
@@ -291,10 +387,18 @@ export default function Dashboard({
                 <div className="space-y-6">
                   <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-300">Optimal Sequence</label>
                   <div className="space-y-2">
-                    <h3 className="text-4xl font-light tracking-tight">{plan.bestTimeToTravel.period}</h3>
+                    <h3 className="text-4xl font-light tracking-tight">
+                      {currentTripDates
+                        ? formatDateRange(currentTripDates.startDate, currentTripDates.endDate)
+                        : savedTrip
+                          ? formatDateRange(savedTrip.start_date, savedTrip.end_date)
+                          : plan.bestTimeToTravel.period}
+                    </h3>
                     <div className="flex items-center gap-2 text-sm text-zinc-400">
                       <span className="w-2 h-2 rounded-full bg-zinc-950" />
-                      {plan.bestTimeToTravel.weather}
+                      {weatherSummary
+                        ? `${weatherSummary.low_c}°C – ${weatherSummary.high_c}°C · ${weatherSummary.condition}`
+                        : plan.bestTimeToTravel.weather}
                     </div>
                   </div>
                   <p className="text-sm font-light leading-relaxed text-zinc-500 max-w-sm">
@@ -421,6 +525,19 @@ export default function Dashboard({
                 <Skeleton className="h-2 w-4/5" />
                 <Skeleton className="h-2 w-3/5" />
               </div>
+            )}
+          </div>
+
+          <div className="space-y-6 pt-12 border-t border-zinc-100">
+            <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-300">Weather at Destination</label>
+            {isWeatherLoading ? (
+              <WeatherSkeleton />
+            ) : weatherSummary ? (
+              <WeatherWidget summary={weatherSummary} />
+            ) : (
+              <p className="text-[11px] text-zinc-400 font-light">
+                {weatherError ?? 'Weather data unavailable.'}
+              </p>
             )}
           </div>
 

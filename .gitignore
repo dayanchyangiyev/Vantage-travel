@@ -1,7 +1,12 @@
 node_modules/
 .env
-Phase2_Documentation.md 
+Phase2_Documentation.md
 db.sqlite3
 *.pyc
 __pycache__/
 dist
+logs/*
+!logs/.gitkeep
+!logs/api_responses/
+logs/api_responses/*
+!logs/api_responses/.gitkeep

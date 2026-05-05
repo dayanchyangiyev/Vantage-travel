@@ -1,6 +1,9 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from .models import Trip
+from .services import VALID_COMFORT_TIERS
 
 
 class TripSerializer(serializers.ModelSerializer):
@@ -17,6 +20,7 @@ class TripSerializer(serializers.ModelSerializer):
             "budget_profile",
             "interests",
             "engine_output",
+            "pricing_snapshot",
             "created_at",
             "updated_at",
         )
@@ -37,4 +41,44 @@ class TripSerializer(serializers.ModelSerializer):
                 {"origin_country": "Origin country cannot be empty."}
             )
 
+        snapshot = attrs.get("pricing_snapshot")
+        if snapshot is not None and snapshot != {}:
+            if not isinstance(snapshot, dict):
+                raise serializers.ValidationError(
+                    {"pricing_snapshot": "Pricing snapshot must be a JSON object."}
+                )
+            tiers = snapshot.get("tiers")
+            if not isinstance(tiers, dict):
+                raise serializers.ValidationError(
+                    {"pricing_snapshot": "Pricing snapshot must include tiers."}
+                )
+            required_tiers = {"cheapest", "affordable", "moderate", "luxury"}
+            if not required_tiers.issubset(set(tiers.keys())):
+                raise serializers.ValidationError(
+                    {"pricing_snapshot": "Pricing tiers are incomplete."}
+                )
+
         return attrs
+
+
+class BudgetTierQuerySerializer(serializers.Serializer):
+    origin_city = serializers.CharField()
+    destination_city = serializers.CharField()
+    destination_country = serializers.CharField()
+    departure_date = serializers.DateField()
+    return_date = serializers.DateField()
+    adults = serializers.IntegerField(min_value=1, default=1)
+    currency = serializers.CharField(required=False, default="USD")
+
+
+class BudgetEvaluationInputSerializer(serializers.Serializer):
+    origin_city = serializers.CharField()
+    destination_city = serializers.CharField()
+    destination_country = serializers.CharField()
+    departure_date = serializers.DateField()
+    return_date = serializers.DateField()
+    adults = serializers.IntegerField(min_value=1, default=1)
+    max_flight_budget = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"))
+    total_living_budget = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"))
+    comfort_preference = serializers.ChoiceField(choices=sorted(VALID_COMFORT_TIERS))
+    currency = serializers.CharField(required=False, default="USD")

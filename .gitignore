@@ -1,7 +1,14 @@
 node_modules/
 .env
+<<<<<<< HEAD
+Phase2_Documentation.md 
+*.sqlite3
+*.sqlite3-journal
+!backend/databases/.gitkeep
+=======
 Phase2_Documentation.md
 db.sqlite3
+>>>>>>> 3f9f5543b4deb513349cbe9291d0777e73c40e03
 *.pyc
 __pycache__/
 dist

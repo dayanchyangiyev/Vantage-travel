@@ -653,17 +653,21 @@ class LocalCostProvider:
             "X-Goog-Api-Key": self.api_key,
             "X-Goog-FieldMask": "places.displayName,places.primaryType,places.priceLevel,places.priceRange,places.rating",
         }
-        response = _http_request_json(
-            method="POST",
-            url=self.base_url,
-            headers=headers,
-            payload={
-                "textQuery": text_query,
-                "maxResultCount": max_result_count,
-            },
-        )
-        places = response.get("places", [])
-        return places if isinstance(places, list) else []
+        try:
+            response = _http_request_json(
+                method="POST",
+                url=self.base_url,
+                headers=headers,
+                payload={
+                    "textQuery": text_query,
+                    "maxResultCount": max_result_count,
+                },
+            )
+            places = response.get("places", [])
+            return places if isinstance(places, list) else []
+        except Exception as e:
+            print(f"Google Places API request failed: {e}")
+            return []
 
     def _extract_costs(
         self,

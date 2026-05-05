@@ -16,7 +16,7 @@ import Login from "./components/Login";
 import Register from "./components/Register";
 import { useAuth } from "./context/AuthContext";
 
-type Step = "landing" | "login" | "register" | "form" | "loading" | "dashboard";
+type Step = "landing" | "login" | "register" | "form" | "dashboard";
 
 export default function App() {
   const [step, setStep] = useState<Step>("landing");
@@ -24,6 +24,8 @@ export default function App() {
   const [savedTrip, setSavedTrip] = useState<SavedTrip | null>(null);
   const [livePricingSnapshot, setLivePricingSnapshot] = useState<DynamicTierQuote | null>(null);
   const [isLoadingSavedTrip, setIsLoadingSavedTrip] = useState(false);
+  const [isPricingLoading, setIsPricingLoading] = useState(false);
+  const [pricingError, setPricingError] = useState<string | null>(null);
   const { isAuthenticated, token, user, logout } = useAuth();
 
   useEffect(() => {
@@ -84,36 +86,53 @@ export default function App() {
   }, [savedTrip]);
 
   const handleStartTrip = async (input: TripInput) => {
-    setStep("loading");
-    try {
-      const destinationParts = (input.destination || "")
-        .split(",")
-        .map((p) => p.trim())
-        .filter(Boolean);
-      const destinationCity = destinationParts[0] || input.destination;
-      const destinationCountry =
-        destinationParts[destinationParts.length - 1] || input.destination;
+    // Go to dashboard immediately — no full-screen loading step
+    setTripPlan(null);
+    setLivePricingSnapshot(null);
+    setPricingError(null);
+    setIsPricingLoading(true);
+    setStep("dashboard");
 
-      let pricingSnapshot: DynamicTierQuote | null = null;
-      try {
-        pricingSnapshot = await fetchDynamicTierQuote({
-          originCity: input.originCountry,
-          destinationCity,
-          destinationCountry,
-          departureDate: input.startDate,
-          returnDate: input.endDate,
-          adults: input.travelers,
-          currency: "USD",
-        });
-        setLivePricingSnapshot(pricingSnapshot);
-      } catch (pricingError) {
-        console.error("Failed to fetch pricing snapshot", pricingError);
-        setLivePricingSnapshot(null);
-      }
+    const destinationParts = (input.destination || "")
+      .split(",")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    const destinationCity = destinationParts[0] || input.destination;
+    const destinationCountry = destinationParts[destinationParts.length - 1] || input.destination;
 
-      const plan = await generateTripPlan(input);
+    // Run pricing and Gemini in parallel — dashboard shows skeletons while they load
+    const [pricingResult, planResult] = await Promise.allSettled([
+      fetchDynamicTierQuote({
+        originCity: input.originCountry,
+        destinationCity,
+        destinationCountry,
+        departureDate: input.startDate,
+        returnDate: input.endDate,
+        adults: input.travelers,
+        currency: "USD",
+      }),
+      generateTripPlan(input),
+    ]);
+
+    // Handle pricing result
+    let pricingSnapshot: DynamicTierQuote | null = null;
+    if (pricingResult.status === "fulfilled") {
+      pricingSnapshot = pricingResult.value;
+      setLivePricingSnapshot(pricingSnapshot);
+      setPricingError(null);
+    } else {
+      const msg = pricingResult.reason?.message || "Could not retrieve pricing data. Please try again later.";
+      setPricingError(msg);
+      console.error("Pricing fetch failed:", pricingResult.reason);
+    }
+    setIsPricingLoading(false);
+
+    // Handle Gemini plan result
+    if (planResult.status === "fulfilled") {
+      const plan = planResult.value;
       setTripPlan(plan);
 
+      // Save the trip in the background if authenticated
       if (isAuthenticated && token) {
         try {
           const persistedTrip = await saveTrip(
@@ -123,14 +142,13 @@ export default function App() {
           );
           setSavedTrip(persistedTrip);
         } catch (saveError) {
-          console.error("Trip generated but failed to save", saveError);
+          console.error("Trip generated but failed to save:", saveError);
         }
       }
-
-      setStep("dashboard");
-    } catch (err) {
-      console.error(err);
-      setStep("form");
+    } else {
+      console.error("Trip plan generation failed:", planResult.reason);
+      // Plan stays null — dashboard shows skeletons with no data
+      // User can go back and retry
     }
   };
 
@@ -139,6 +157,8 @@ export default function App() {
     setTripPlan(null);
     setSavedTrip(null);
     setLivePricingSnapshot(null);
+    setIsPricingLoading(false);
+    setPricingError(null);
     setStep("landing");
   };
 
@@ -270,24 +290,6 @@ export default function App() {
           </motion.div>
         )}
 
-        {step === "loading" && (
-          <motion.div
-            key="loading"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 flex flex-col items-center justify-center bg-white"
-          >
-            <motion.div
-              animate={{ scaleX: [0, 1, 0] }}
-              transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
-              className="w-48 h-[1px] bg-zinc-900 mb-6"
-            />
-            <h2 className="text-xs uppercase tracking-[0.4em] font-light text-zinc-400">
-              Processing Requirements
-            </h2>
-          </motion.div>
-        )}
 
         {step === "login" && (
           <motion.div
@@ -321,12 +323,14 @@ export default function App() {
           </motion.div>
         )}
 
-        {step === "dashboard" && tripPlan && (
+        {step === "dashboard" && (
           <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <Dashboard
               plan={tripPlan}
               savedTrip={savedTrip}
               pricingSnapshot={livePricingSnapshot}
+              isPricingLoading={isPricingLoading}
+              pricingError={pricingError}
               onBack={() => setStep(isAuthenticated ? "landing" : "form")}
             />
           </motion.div>

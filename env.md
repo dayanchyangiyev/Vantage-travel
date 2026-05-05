@@ -4,7 +4,7 @@ Use these keys in `.env/.env` and provide your own values.
 
 ```env
 # Django core
-DJANGO_SECRET_KEY=
+# DJANGO_SECRET_KEY= (Optional in dev, defaults to insecure key)
 DJANGO_DEBUG=True
 DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
 

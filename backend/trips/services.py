@@ -674,18 +674,28 @@ class LocalCostProvider:
         places: List[Dict[str, Any]],
         base_anchor: Decimal,
     ) -> List[Decimal]:
+        # priceRange is intentionally ignored: Google returns it in local currency
+        # with no reliable conversion, so treating it as USD gives absurd results
+        # (e.g. 2000 EGP for a Cairo restaurant reads as $2000). priceLevel is a
+        # market-relative categorical label and is currency-agnostic.
         values: List[Decimal] = []
         for place in places:
             if not isinstance(place, dict):
                 continue
             coeff = self._price_level_coeff(place.get("priceLevel"))
-            price_range = place.get("priceRange")
-            explicit_amount = self._mid_price_from_range(price_range)
-            if explicit_amount is not None and explicit_amount > 0:
-                values.append(explicit_amount)
-                continue
             values.append(base_anchor * coeff)
         return [v for v in values if v > 0]
+
+    # Fixed daily public-transit estimates per tier. Places API "transport" searches
+    # return tour operators and private car services, not per-ride fares, so these
+    # are hardcoded. All tiers represent public transit (bus/metro/tram); luxury
+    # adds frequent taxi use on top of transit — no private car rental included.
+    _DAILY_TRANSPORT = {
+        "cheapest": Decimal("3"),    # bus / metro with transfers
+        "affordable": Decimal("6"),  # metro daily pass
+        "moderate": Decimal("10"),   # metro + occasional taxi
+        "luxury": Decimal("18"),     # frequent taxi + premium transit
+    }
 
     def fetch_daily_tier_costs(
         self, destination_city: str, destination_country: str, currency: str
@@ -696,41 +706,35 @@ class LocalCostProvider:
         city_query = f"{destination_city}, {destination_country}"
         restaurants = self._places_text_search(f"restaurants in {city_query}", 20)
         cafes = self._places_text_search(f"cafes in {city_query}", 20)
-        transport = self._places_text_search(f"public transport in {city_query}", 20)
 
-        # Excludes hotel/apartment pricing by design (restaurants/cafes/transport only).
+        # Transport is excluded from Places queries: the API surfaces tour operators
+        # and private car services whose prices are not per-ride transit fares.
         food_values = self._extract_costs(restaurants + cafes, base_anchor=Decimal("10"))
-        transport_values = self._extract_costs(transport, base_anchor=Decimal("2.5"))
 
-        if not food_values and not transport_values:
+        if not food_values:
             raise ValueError("Google Places returned no usable local-living signals.")
 
-        food_pool = sorted(food_values or transport_values)
-        transport_pool = sorted(transport_values or food_values)
+        food_pool = sorted(food_values)
 
         food_cheapest = _tier_value_from_sorted(food_pool, Decimal("0.15"))
         food_affordable = _tier_value_from_sorted(food_pool, Decimal("0.40"))
         food_moderate = _tier_value_from_sorted(food_pool, Decimal("0.60"))
         food_luxury = _tier_value_from_sorted(food_pool, Decimal("0.90"))
 
-        transport_cheapest = _tier_value_from_sorted(transport_pool, Decimal("0.15"))
-        transport_affordable = _tier_value_from_sorted(transport_pool, Decimal("0.40"))
-        transport_moderate = _tier_value_from_sorted(transport_pool, Decimal("0.60"))
-        transport_luxury = _tier_value_from_sorted(transport_pool, Decimal("0.90"))
-
+        t = self._DAILY_TRANSPORT
         # Daily per-traveler local costs (meals + local transport + incidentals).
         tiers = {
             "cheapest": (food_cheapest * Decimal("1.7"))
-            + (transport_cheapest * Decimal("2.0"))
+            + t["cheapest"]
             + Decimal("6"),
             "affordable": (food_affordable * Decimal("2.0"))
-            + (transport_affordable * Decimal("2.2"))
+            + t["affordable"]
             + Decimal("10"),
             "moderate": (food_moderate * Decimal("2.3"))
-            + (transport_moderate * Decimal("2.5"))
+            + t["moderate"]
             + Decimal("16"),
             "luxury": (food_luxury * Decimal("2.8"))
-            + (transport_luxury * Decimal("3.0"))
+            + t["luxury"]
             + Decimal("28"),
         }
 

@@ -1,9 +1,9 @@
 """
 test_services_local_costs.py — Unit tests for LocalCostProvider (Google Places API).
 
-LocalCostProvider calls Google Places Text Search three times (restaurants,
-cafes, transport) and combines the results into daily cost tiers. All three
-HTTP calls are mocked here so no real API key is required.
+LocalCostProvider calls Google Places Text Search twice (restaurants, cafes)
+and combines the results into daily cost tiers. Transport uses fixed daily
+estimates per tier. All HTTP calls are mocked here so no real API key is required.
 
 Functions/methods tested:
   - _money_to_decimal         : converts Google Money proto dict to Decimal
@@ -120,7 +120,7 @@ class TestPriceLevelCoeff:
 
 class TestFetchDailyTierCosts:
     def test_returns_all_four_tiers(self, local_provider, google_places_response, mocker):
-        # All three Places queries (restaurants, cafes, transport) return the same fixture
+        # Both Places queries (restaurants, cafes) return the same fixture
         mocker.patch.object(
             local_provider, "_places_text_search", return_value=google_places_response["places"]
         )

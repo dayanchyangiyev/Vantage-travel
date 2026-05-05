@@ -10,3 +10,8 @@ logs/*
 !logs/api_responses/
 logs/api_responses/*
 !logs/api_responses/.gitkeep
+Backend_Test_Report_Bucharest_Frankfurt.md
+Live_API_logic.md
+TravelPilot_Budget_Engine_Report.md
+TravelPilot_Live_API_Pricing_Report.md
+Trip_Search_Save_Fix_Report.md

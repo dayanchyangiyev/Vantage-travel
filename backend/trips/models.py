@@ -39,7 +39,7 @@ class Trip(models.Model):
                 name="trip_end_date_gte_start_date",
             ),
         ]
-        ordering = ["-created_at"]
+        ordering = ["-created_at", "-id"]
 
     def clean(self):
         if self.end_date and self.start_date and self.end_date < self.start_date:

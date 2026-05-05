@@ -12,7 +12,7 @@
 
 import React, { ReactElement } from 'react';
 import { render, RenderOptions } from '@testing-library/react';
-import { AuthProvider } from '../../src/context/AuthContext';
+import { AuthProvider } from '../src/context/AuthContext';
 
 /**
  * Wraps a component with AuthProvider before rendering.

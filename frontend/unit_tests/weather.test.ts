@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fetchWeatherSummary, WeatherParams } from '../../src/lib/weather';
+import { fetchWeatherSummary, WeatherParams } from '../src/lib/weather';
 
 // Mock the global fetch
 const globalFetch = vi.fn();

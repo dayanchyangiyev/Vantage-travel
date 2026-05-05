@@ -9,8 +9,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "vitest run unit_tests/frontend",
-    "test:watch": "vitest unit_tests/frontend"
+    "test": "vitest run unit_tests",
+    "test:watch": "vitest unit_tests"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

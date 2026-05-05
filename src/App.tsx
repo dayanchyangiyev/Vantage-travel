@@ -6,10 +6,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { ChevronRight, ArrowLeft, User as UserIcon, LogOut } from "lucide-react";
-import { DynamicTierQuote, SavedTrip, TripInput, TripPlan } from "./types/trip";
+import { DynamicTierQuote, SavedTrip, TripInput, TripPlan, WeatherSummary } from "./types/trip";
 import { generateTripPlan } from "./lib/gemini";
 import { fetchCurrentTrip, saveTrip } from "./lib/trips";
 import { fetchDynamicTierQuote } from "./lib/dynamicPricing";
+import { fetchWeatherSummary } from "./lib/weather";
 import TripForm from "./components/TripForm";
 import Dashboard from "./components/Dashboard";
 import Login from "./components/Login";
@@ -23,8 +24,12 @@ export default function App() {
   const [tripPlan, setTripPlan] = useState<TripPlan | null>(null);
   const [savedTrip, setSavedTrip] = useState<SavedTrip | null>(null);
   const [livePricingSnapshot, setLivePricingSnapshot] = useState<DynamicTierQuote | null>(null);
+  const [weatherSummary, setWeatherSummary] = useState<WeatherSummary | null>(null);
+  const [weatherError, setWeatherError] = useState<string | null>(null);
+  const [currentTripDates, setCurrentTripDates] = useState<{ startDate: string; endDate: string } | null>(null);
   const [isLoadingSavedTrip, setIsLoadingSavedTrip] = useState(false);
   const [isPricingLoading, setIsPricingLoading] = useState(false);
+  const [isWeatherLoading, setIsWeatherLoading] = useState(false);
   const [pricingError, setPricingError] = useState<string | null>(null);
   const { isAuthenticated, token, user, logout } = useAuth();
 
@@ -89,8 +94,12 @@ export default function App() {
     // Go to dashboard immediately — no full-screen loading step
     setTripPlan(null);
     setLivePricingSnapshot(null);
+    setWeatherSummary(null);
+    setWeatherError(null);
     setPricingError(null);
     setIsPricingLoading(true);
+    setIsWeatherLoading(true);
+    setCurrentTripDates({ startDate: input.startDate, endDate: input.endDate });
     setStep("dashboard");
 
     const destinationParts = (input.destination || "")
@@ -100,8 +109,8 @@ export default function App() {
     const destinationCity = destinationParts[0] || input.destination;
     const destinationCountry = destinationParts[destinationParts.length - 1] || input.destination;
 
-    // Run pricing and Gemini in parallel — dashboard shows skeletons while they load
-    const [pricingResult, planResult] = await Promise.allSettled([
+    // Run pricing, Gemini, and weather in parallel — dashboard shows skeletons while they load
+    const [pricingResult, planResult, weatherResult] = await Promise.allSettled([
       fetchDynamicTierQuote({
         originCity: input.originCountry,
         destinationCity,
@@ -112,6 +121,12 @@ export default function App() {
         currency: "USD",
       }),
       generateTripPlan(input),
+      fetchWeatherSummary({
+        destinationCity,
+        destinationCountry,
+        startDate: input.startDate,
+        endDate: input.endDate,
+      }),
     ]);
 
     // Handle pricing result
@@ -126,6 +141,17 @@ export default function App() {
       console.error("Pricing fetch failed:", pricingResult.reason);
     }
     setIsPricingLoading(false);
+
+    // Handle weather result
+    if (weatherResult.status === "fulfilled") {
+      setWeatherSummary(weatherResult.value);
+      setWeatherError(null);
+    } else {
+      const msg = weatherResult.reason?.message || "Weather data unavailable.";
+      setWeatherError(msg);
+      console.error("Weather fetch failed:", weatherResult.reason);
+    }
+    setIsWeatherLoading(false);
 
     // Handle Gemini plan result
     if (planResult.status === "fulfilled") {
@@ -157,7 +183,11 @@ export default function App() {
     setTripPlan(null);
     setSavedTrip(null);
     setLivePricingSnapshot(null);
+    setWeatherSummary(null);
+    setWeatherError(null);
+    setCurrentTripDates(null);
     setIsPricingLoading(false);
+    setIsWeatherLoading(false);
     setPricingError(null);
     setStep("landing");
   };
@@ -328,9 +358,13 @@ export default function App() {
             <Dashboard
               plan={tripPlan}
               savedTrip={savedTrip}
+              currentTripDates={currentTripDates}
               pricingSnapshot={livePricingSnapshot}
               isPricingLoading={isPricingLoading}
               pricingError={pricingError}
+              weatherSummary={weatherSummary}
+              weatherError={weatherError}
+              isWeatherLoading={isWeatherLoading}
               onBack={() => setStep(isAuthenticated ? "landing" : "form")}
             />
           </motion.div>

@@ -64,6 +64,18 @@ export interface BudgetCalculation {
   foodInfo: string;
 }
 
+export interface WeatherSummary {
+  condition: string;
+  high_c: number;
+  low_c: number;
+  high_f: number;
+  low_f: number;
+  humidity_pct: number;
+  precipitation_pct: number;
+  date_label: string;
+  is_forecast: boolean;
+}
+
 export interface TripPlan {
   bestTimeToTravel: {
     period: string;

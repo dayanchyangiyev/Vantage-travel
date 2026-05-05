@@ -15,8 +15,9 @@ from .serializers import (
     BudgetEvaluationInputSerializer,
     BudgetTierQuerySerializer,
     TripSerializer,
+    WeatherQuerySerializer,
 )
-from .services import DynamicPricingInput, build_dynamic_tier_quotes, evaluate_dynamic_budget
+from .services import DynamicPricingInput, build_dynamic_tier_quotes, evaluate_dynamic_budget, fetch_destination_weather
 from .api_logging import log_api_response
 
 
@@ -161,6 +162,31 @@ def evaluate_budget(request):
     except ValueError as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
+    return Response(result, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def destination_weather(request):
+    serializer = WeatherQuerySerializer(data=request.query_params)
+    serializer.is_valid(raise_exception=True)
+    payload = serializer.validated_data
+    start = payload.get("start_date")
+    end = payload.get("end_date")
+    try:
+        result = fetch_destination_weather(
+            destination_city=payload["destination_city"],
+            destination_country=payload["destination_country"],
+            start_date=start.isoformat() if start else None,
+            end_date=end.isoformat() if end else None,
+        )
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception:
+        return Response(
+            {"detail": "Weather service temporarily unavailable."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
     return Response(result, status=status.HTTP_200_OK)
 
 

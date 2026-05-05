@@ -24,8 +24,8 @@ export default defineConfig(({mode}) => {
     test: {
       globals: true,
       environment: 'jsdom',
-      setupFiles: ['./unit_tests/frontend/setup.ts'],
-      include: ['unit_tests/frontend/**/*.test.{ts,tsx}'],
+      setupFiles: ['./unit_tests/setup.ts'],
+      include: ['unit_tests/**/*.test.{ts,tsx}'],
     },
   };
 });

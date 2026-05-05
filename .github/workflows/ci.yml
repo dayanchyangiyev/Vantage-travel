@@ -33,10 +33,14 @@ jobs:
           cache: 'npm'
 
       - name: Install Frontend Dependencies
-        run: npm ci
+        run: |
+          cd frontend
+          npm ci
 
       - name: Run Frontend Tests (Vitest)
-        run: npm run test
+        run: |
+          cd frontend
+          npm run test
 
       # -----------------------------------------------------------
       # 2. Backend Setup & Tests (Django + Pytest)
@@ -55,7 +59,7 @@ jobs:
       - name: Run Backend Tests (Pytest)
         run: |
           cd backend
-          python -m pytest ../unit_tests/backend/ -v
+          python -m pytest unit_tests/ -v
 
   all-tests-pass:
     name: All Tests Pass

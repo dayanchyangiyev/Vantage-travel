@@ -17,7 +17,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import TripForm from '../../src/components/TripForm';
+import TripForm from '../src/components/TripForm';
 import { noop } from './test_utils';
 
 
@@ -27,7 +27,7 @@ import { noop } from './test_utils';
 // GeoAutocomplete calls the GeoNames API on every keystroke. In tests, we
 // replace it with a simple <input> that forwards the value and onChange.
 // ---------------------------------------------------------------------------
-vi.mock('../../src/components/GeoAutocomplete', () => ({
+vi.mock('../src/components/GeoAutocomplete', () => ({
   default: ({ id, placeholder, value, onChange }: any) => (
     <input
       id={id}

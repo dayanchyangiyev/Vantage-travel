@@ -182,3 +182,14 @@ CORS_ALLOW_ALL_ORIGINS = config("CORS_ALLOW_ALL_ORIGINS", default=True, cast=boo
 
 GOOGLE_MAPS_API_KEY = config("GOOGLE_MAPS_API_KEY", default="")
 GEONAMES_USERNAME = config("GEONAMES_USERNAME", default="")
+
+# Dynamic travel pricing providers
+SERPAPI_BASE_URL = config("SERPAPI_BASE_URL", default="https://serpapi.com/search.json")
+SERPAPI_API_KEY = config("SERPAPI_API_KEY", default="")
+
+# Google Places API provider for local daily costs (excluding lodging).
+GOOGLE_PLACES_TEXT_SEARCH_URL = config(
+    "GOOGLE_PLACES_TEXT_SEARCH_URL",
+    default="https://places.googleapis.com/v1/places:searchText",
+)
+GOOGLE_PLACES_API_KEY = config("GOOGLE_PLACES_API_KEY", default="")

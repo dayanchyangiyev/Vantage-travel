@@ -6,9 +6,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { ChevronRight, ArrowLeft, User as UserIcon, LogOut } from "lucide-react";
-import { SavedTrip, TripInput, TripPlan } from "./types/trip";
+import { DynamicTierQuote, SavedTrip, TripInput, TripPlan } from "./types/trip";
 import { generateTripPlan } from "./lib/gemini";
 import { fetchCurrentTrip, saveTrip } from "./lib/trips";
+import { fetchDynamicTierQuote } from "./lib/dynamicPricing";
 import TripForm from "./components/TripForm";
 import Dashboard from "./components/Dashboard";
 import Login from "./components/Login";
@@ -21,6 +22,7 @@ export default function App() {
   const [step, setStep] = useState<Step>("landing");
   const [tripPlan, setTripPlan] = useState<TripPlan | null>(null);
   const [savedTrip, setSavedTrip] = useState<SavedTrip | null>(null);
+  const [livePricingSnapshot, setLivePricingSnapshot] = useState<DynamicTierQuote | null>(null);
   const [isLoadingSavedTrip, setIsLoadingSavedTrip] = useState(false);
   const { isAuthenticated, token, user, logout } = useAuth();
 
@@ -41,6 +43,11 @@ export default function App() {
         }
 
         setSavedTrip(trip);
+        setLivePricingSnapshot(
+          trip?.pricing_snapshot && "tiers" in trip.pricing_snapshot
+            ? (trip.pricing_snapshot as DynamicTierQuote)
+            : null
+        );
         if (trip?.engine_output && Object.keys(trip.engine_output).length > 0) {
           setTripPlan(trip.engine_output);
           setStep("dashboard");
@@ -79,12 +86,41 @@ export default function App() {
   const handleStartTrip = async (input: TripInput) => {
     setStep("loading");
     try {
+      const destinationParts = (input.destination || "")
+        .split(",")
+        .map((p) => p.trim())
+        .filter(Boolean);
+      const destinationCity = destinationParts[0] || input.destination;
+      const destinationCountry =
+        destinationParts[destinationParts.length - 1] || input.destination;
+
+      let pricingSnapshot: DynamicTierQuote | null = null;
+      try {
+        pricingSnapshot = await fetchDynamicTierQuote({
+          originCity: input.originCountry,
+          destinationCity,
+          destinationCountry,
+          departureDate: input.startDate,
+          returnDate: input.endDate,
+          adults: input.travelers,
+          currency: "USD",
+        });
+        setLivePricingSnapshot(pricingSnapshot);
+      } catch (pricingError) {
+        console.error("Failed to fetch pricing snapshot", pricingError);
+        setLivePricingSnapshot(null);
+      }
+
       const plan = await generateTripPlan(input);
       setTripPlan(plan);
 
       if (isAuthenticated && token) {
         try {
-          const persistedTrip = await saveTrip(token, input, plan);
+          const persistedTrip = await saveTrip(
+            token,
+            { ...input, pricingSnapshot },
+            plan
+          );
           setSavedTrip(persistedTrip);
         } catch (saveError) {
           console.error("Trip generated but failed to save", saveError);
@@ -102,6 +138,7 @@ export default function App() {
     logout();
     setTripPlan(null);
     setSavedTrip(null);
+    setLivePricingSnapshot(null);
     setStep("landing");
   };
 
@@ -289,6 +326,7 @@ export default function App() {
             <Dashboard
               plan={tripPlan}
               savedTrip={savedTrip}
+              pricingSnapshot={livePricingSnapshot}
               onBack={() => setStep(isAuthenticated ? "landing" : "form")}
             />
           </motion.div>

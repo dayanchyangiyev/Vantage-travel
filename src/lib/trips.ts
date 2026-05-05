@@ -40,6 +40,7 @@ export async function saveTrip(
       budget_profile: input.budget,
       interests: input.interests,
       engine_output: plan,
+      pricing_snapshot: input.pricingSnapshot || {},
     }),
   });
 

@@ -6,6 +6,7 @@ export interface TripInput {
   startDate: string;
   endDate: string;
   interests: string[];
+  pricingSnapshot?: DynamicTierQuote | null;
 }
 
 export interface SavedTrip {
@@ -19,8 +20,31 @@ export interface SavedTrip {
   budget_profile: 'cheapest' | 'affordable' | 'moderate' | 'luxury';
   interests: string[];
   engine_output: TripPlan;
+  pricing_snapshot?: DynamicTierQuote | Record<string, unknown>;
   created_at: string;
   updated_at: string;
+}
+
+export interface DynamicTierBreakdown {
+  flight_cost: number;
+  hotel_daily_cost: number;
+  local_daily_cost: number;
+  total_daily_living_cost: number;
+  total_living_cost: number;
+  total_trip_cost: number;
+}
+
+export interface DynamicTierQuote {
+  destination_city: string;
+  destination_country: string;
+  trip_duration_days: number;
+  currency: string;
+  tiers: Record<'cheapest' | 'affordable' | 'moderate' | 'luxury', DynamicTierBreakdown>;
+  sources: {
+    flights: string;
+    hotels: string;
+    local_costs: string;
+  };
 }
 
 export interface TicketInfo {

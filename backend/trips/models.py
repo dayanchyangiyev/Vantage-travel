@@ -28,6 +28,7 @@ class Trip(models.Model):
     )
     interests = models.JSONField(default=list, blank=True)
     engine_output = models.JSONField(default=dict, blank=True)
+    pricing_snapshot = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

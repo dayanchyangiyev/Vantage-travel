@@ -1,9 +1,24 @@
 node_modules/
 .env
+<<<<<<< HEAD
 Phase2_Documentation.md 
 *.sqlite3
 *.sqlite3-journal
 !backend/databases/.gitkeep
+=======
+Phase2_Documentation.md
+db.sqlite3
+>>>>>>> 3f9f5543b4deb513349cbe9291d0777e73c40e03
 *.pyc
 __pycache__/
 dist
+logs/*
+!logs/.gitkeep
+!logs/api_responses/
+logs/api_responses/*
+!logs/api_responses/.gitkeep
+Backend_Test_Report_Bucharest_Frankfurt.md
+Live_API_logic.md
+TravelPilot_Budget_Engine_Report.md
+TravelPilot_Live_API_Pricing_Report.md
+Trip_Search_Save_Fix_Report.md

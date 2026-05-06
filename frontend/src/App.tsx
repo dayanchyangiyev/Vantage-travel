@@ -21,6 +21,7 @@ type Step = "landing" | "login" | "register" | "form" | "dashboard";
 
 export default function App() {
   const [step, setStep] = useState<Step>("landing");
+  const [currentTripInput, setCurrentTripInput] = useState<TripInput | null>(null);
   const [tripPlan, setTripPlan] = useState<TripPlan | null>(null);
   const [savedTrip, setSavedTrip] = useState<SavedTrip | null>(null);
   const [livePricingSnapshot, setLivePricingSnapshot] = useState<DynamicTierQuote | null>(null);
@@ -38,7 +39,13 @@ export default function App() {
 
     async function loadSavedTrip() {
       if (!isAuthenticated || !token) {
-        setSavedTrip(null);
+        // We only clear savedTrip if we are resetting the state, not handled here.
+        return;
+      }
+
+      // If we already have a trip plan in memory (e.g. user just created one anonymously),
+      // we shouldn't overwrite it with their old saved trip.
+      if (tripPlan) {
         return;
       }
 
@@ -72,6 +79,9 @@ export default function App() {
     return () => {
       isCancelled = true;
     };
+  // We only run loadSavedTrip when auth state changes, and we do not want it to re-run
+  // just because tripPlan changes, so we intentionally exclude tripPlan from deps.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, token]);
 
   const initialTripInput = useMemo<Partial<TripInput> | undefined>(() => {
@@ -91,6 +101,9 @@ export default function App() {
   }, [savedTrip]);
 
   const handleStartTrip = async (input: TripInput) => {
+    // Save input in case user decides to sign in / register later
+    setCurrentTripInput(input);
+    
     // Go to dashboard immediately — no full-screen loading step
     setTripPlan(null);
     setLivePricingSnapshot(null);
@@ -180,6 +193,7 @@ export default function App() {
 
   const handleLogout = () => {
     logout();
+    setCurrentTripInput(null);
     setTripPlan(null);
     setSavedTrip(null);
     setLivePricingSnapshot(null);
@@ -190,6 +204,27 @@ export default function App() {
     setIsWeatherLoading(false);
     setPricingError(null);
     setStep("landing");
+  };
+
+  const handleAuthSuccess = async () => {
+    const activeToken = localStorage.getItem('access_token');
+    
+    if (activeToken && tripPlan && currentTripInput) {
+      try {
+        const persistedTrip = await saveTrip(
+          activeToken,
+          { ...currentTripInput, pricingSnapshot: livePricingSnapshot },
+          tripPlan
+        );
+        setSavedTrip(persistedTrip);
+        setStep("dashboard");
+      } catch (error) {
+        console.error("Failed to save generated trip to new account:", error);
+        setStep("dashboard");
+      }
+    } else {
+      setStep(tripPlan ? "dashboard" : "landing");
+    }
   };
 
   const hasSavedPlan = !!(savedTrip && tripPlan);
@@ -330,8 +365,8 @@ export default function App() {
             className="flex items-center justify-center min-h-screen px-6 py-24"
           >
             <Login
-              onBack={() => setStep("landing")}
-              onSuccess={() => setStep("landing")}
+              onBack={() => setStep(tripPlan ? "dashboard" : "landing")}
+              onSuccess={handleAuthSuccess}
               onNavigateRegister={() => setStep("register")}
             />
           </motion.div>
@@ -346,7 +381,7 @@ export default function App() {
             className="flex items-center justify-center min-h-screen px-6 py-24"
           >
             <Register
-              onBack={() => setStep("landing")}
+              onBack={() => setStep(tripPlan ? "dashboard" : "landing")}
               onSuccess={() => setStep("login")}
               onNavigateLogin={() => setStep("login")}
             />
@@ -356,6 +391,9 @@ export default function App() {
         {step === "dashboard" && (
           <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <Dashboard
+              isAuthenticated={isAuthenticated}
+              onLogin={() => setStep("login")}
+              onRegister={() => setStep("register")}
               plan={tripPlan}
               savedTrip={savedTrip}
               currentTripDates={currentTripDates}

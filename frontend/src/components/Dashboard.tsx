@@ -164,26 +164,26 @@ function WeatherWidget({ summary }: { summary: WeatherSummary }) {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="border border-zinc-100 bg-zinc-50/50 p-6 space-y-5"
+      className="border border-zinc-100 bg-zinc-50/50 p-8 space-y-6"
     >
       {/* Condition + forecast/reference badge */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <Icon className="w-5 h-5 text-zinc-500 flex-shrink-0" />
-          <span className="text-sm font-light text-zinc-800">{summary.condition}</span>
+          <Icon className="w-6 h-6 text-zinc-500 flex-shrink-0" />
+          <span className="text-base font-light text-zinc-800">{summary.condition}</span>
         </div>
-        <span className="text-[10px] uppercase tracking-widest text-zinc-300 font-bold shrink-0">
+        <span className="text-[11px] uppercase tracking-widest text-zinc-300 font-bold shrink-0">
           {summary.is_forecast ? 'Forecast' : 'Reference'}
         </span>
       </div>
 
       {/* Date label — single line */}
-      <p className="text-xs text-zinc-400 font-light leading-none">{summary.date_label}</p>
+      <p className="text-sm text-zinc-400 font-light leading-none">{summary.date_label}</p>
 
       {/* Temperature range low → high — single line */}
       <div className="flex items-center gap-3">
-        <Thermometer className="w-4 h-4 text-zinc-300 flex-shrink-0" />
-        <span className="text-sm text-zinc-700 whitespace-nowrap">
+        <Thermometer className="w-5 h-5 text-zinc-300 flex-shrink-0" />
+        <span className="text-lg text-zinc-700 whitespace-nowrap">
           {summary.low_c}°C – {summary.high_c}°C &nbsp;/&nbsp; {summary.low_f}°F – {summary.high_f}°F
         </span>
       </div>
@@ -191,14 +191,14 @@ function WeatherWidget({ summary }: { summary: WeatherSummary }) {
       {/* Humidity + rain — single line */}
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-2">
-          <Droplets className="w-4 h-4 text-zinc-300 flex-shrink-0" />
-          <span className="text-xs text-zinc-500">
+          <Droplets className="w-5 h-5 text-zinc-300 flex-shrink-0" />
+          <span className="text-sm text-zinc-500">
             Humidity&nbsp;<span className="text-zinc-700 font-medium">{summary.humidity_pct}%</span>
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <CloudRain className="w-4 h-4 text-zinc-300 flex-shrink-0" />
-          <span className="text-xs text-zinc-500">
+          <CloudRain className="w-5 h-5 text-zinc-300 flex-shrink-0" />
+          <span className="text-sm text-zinc-500">
             Rain&nbsp;<span className="text-zinc-700 font-medium">{summary.precipitation_pct}%</span>
           </span>
         </div>
@@ -228,7 +228,10 @@ export default function Dashboard({
   weatherSummary,
   weatherError,
   isWeatherLoading,
+  isAuthenticated,
   onBack,
+  onLogin,
+  onRegister,
 }: {
   plan: TripPlan | null;
   savedTrip: SavedTrip | null;
@@ -239,7 +242,10 @@ export default function Dashboard({
   weatherSummary: WeatherSummary | null;
   weatherError: string | null;
   isWeatherLoading: boolean;
+  isAuthenticated: boolean;
   onBack: () => void;
+  onLogin: () => void;
+  onRegister: () => void;
 }) {
   const initialTier = (savedTrip?.budget_profile || 'moderate') as TierKey;
   const [selectedTier, setSelectedTier] = useState<TierKey>(initialTier);
@@ -273,9 +279,27 @@ export default function Dashboard({
           Select Trip
         </button>
         <div className="text-[10px] uppercase tracking-[0.4em] font-bold text-zinc-950">Vantage / Exploration</div>
-        <button className="text-zinc-300 hover:text-zinc-950 transition-colors">
-          <MoreHorizontal className="w-5 h-5" />
-        </button>
+        <div className="flex items-center gap-6">
+          {!isAuthenticated && plan && (
+            <div className="flex gap-4">
+              <button
+                onClick={onLogin}
+                className="text-xs uppercase tracking-widest font-medium text-zinc-500 hover:text-zinc-900 transition-colors"
+              >
+                Sign In
+              </button>
+              <button
+                onClick={onRegister}
+                className="text-xs uppercase tracking-widest font-medium text-white bg-zinc-950 hover:bg-zinc-800 px-4 py-2 transition-colors"
+              >
+                Save Trip
+              </button>
+            </div>
+          )}
+          <button className="text-zinc-300 hover:text-zinc-950 transition-colors">
+            <MoreHorizontal className="w-5 h-5" />
+          </button>
+        </div>
       </nav>
 
       <header className="mb-28">
@@ -383,7 +407,7 @@ export default function Dashboard({
               animate={{ opacity: 1 }}
               className="space-y-20"
             >
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+              <div className="space-y-6">
                 <div className="space-y-6">
                   <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-300">Optimal Sequence</label>
                   <div className="space-y-2">
@@ -404,12 +428,6 @@ export default function Dashboard({
                   <p className="text-sm font-light leading-relaxed text-zinc-500 max-w-sm">
                     {plan.bestTimeToTravel.reason}
                   </p>
-                </div>
-                <div className="flex items-end md:justify-end">
-                  <div className="text-left md:text-right">
-                    <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-300 block mb-2">Crowd Density</label>
-                    <div className="text-5xl font-light tracking-tighter uppercase">{plan.bestTimeToTravel.touristDensity}</div>
-                  </div>
                 </div>
               </div>
 
@@ -489,20 +507,20 @@ export default function Dashboard({
                     <button
                       key={tier}
                       onClick={() => setSelectedTier(tier)}
-                      className={`w-full text-left p-5 border transition-all ${
+                      className={`w-full flex flex-col items-center justify-center text-center p-6 border transition-all ${
                         selected
                           ? 'border-zinc-900 bg-zinc-950 text-white'
                           : 'border-zinc-200 bg-zinc-50 hover:border-zinc-400'
                       }`}
                     >
-                      <div className={`text-[10px] uppercase tracking-[0.2em] mb-3 ${selected ? 'text-zinc-300' : 'text-zinc-500'}`}>
+                      <div className={`text-[11px] uppercase tracking-[0.25em] font-medium mb-4 ${selected ? 'text-zinc-300' : 'text-zinc-500'}`}>
                         {tier}
                       </div>
-                      <div className="text-sm mb-1">Flight: ${entry.flight_cost.toFixed(0)}</div>
-                      <div className="text-sm mb-1">Hotel/day: ${entry.hotel_daily_cost.toFixed(0)}</div>
-                      <div className="text-sm mb-1">Living/day: ${entry.local_daily_cost.toFixed(0)}</div>
-                      <div className="text-sm mb-1">Stay: {effectivePricingSnapshot.trip_duration_days} day(s)</div>
-                      <div className="text-base mt-3 font-semibold">Final: ${entry.total_trip_cost.toFixed(0)}</div>
+                      <div className="text-sm font-light mb-1">Flight: ${entry.flight_cost.toFixed(0)}</div>
+                      <div className="text-sm font-light mb-1">Hotel/day: ${entry.hotel_daily_cost.toFixed(0)}</div>
+                      <div className="text-sm font-light mb-1">Living/day: ${entry.local_daily_cost.toFixed(0)}</div>
+                      <div className="text-sm font-light mb-1">Stay: {effectivePricingSnapshot.trip_duration_days} day(s)</div>
+                      <div className="text-lg mt-4 font-semibold tracking-wide">Final: ${entry.total_trip_cost.toFixed(0)}</div>
                     </button>
                   );
                 })}

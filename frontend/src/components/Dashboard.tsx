@@ -1,7 +1,11 @@
 import { useMemo, useState } from 'react';
-import { ArrowLeft, MoreHorizontal, AlertTriangle, RefreshCw, Sun, Cloud, CloudRain, Thermometer, Droplets } from 'lucide-react';
+import {
+  ArrowLeft, MoreHorizontal, AlertTriangle, RefreshCw, Sun, Cloud, CloudRain, Droplets,
+  Plane, BedDouble, ChevronRight, Check,
+} from 'lucide-react';
 import { motion } from 'motion/react';
-import { DynamicTierQuote, SavedTrip, TripPlan, WeatherSummary } from '../types/trip';
+import { DynamicTierQuote, FlightOption, HotelOption, SavedTrip, TripPlan, WeatherSummary } from '../types/trip';
+import BookingSearch, { BookingTripContext } from './BookingSearch';
 
 type TierKey = 'cheapest' | 'affordable' | 'moderate' | 'luxury';
 
@@ -92,23 +96,6 @@ function TripPlanSkeleton() {
           </div>
         </div>
       </div>
-      {/* Transit protocols */}
-      <div className="space-y-6 pt-20 border-t border-zinc-50">
-        <Skeleton className="h-2 w-28" />
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-zinc-100 border border-zinc-100">
-          {[0, 1].map((i) => (
-            <div key={i} className="bg-white p-8 space-y-4">
-              <div className="flex justify-between">
-                <Skeleton className="h-3 w-24" />
-                <Skeleton className="h-5 w-16" />
-              </div>
-              <Skeleton className="h-2 w-full" />
-              <Skeleton className="h-2 w-4/5" />
-              <Skeleton className="h-2 w-3/5" />
-            </div>
-          ))}
-        </div>
-      </div>
       {/* Places */}
       <div className="space-y-8 pt-20 border-t border-zinc-50">
         <Skeleton className="h-2 w-36" />
@@ -132,16 +119,19 @@ function TripPlanSkeleton() {
 // ---------------------------------------------------------------------------
 function WeatherSkeleton() {
   return (
-    <div className="border border-zinc-100 p-6 space-y-5">
-      <div className="flex items-center justify-between">
-        <Skeleton className="h-5 w-32" />
-        <Skeleton className="h-3 w-16" />
+    <div className="border border-zinc-200 bg-white">
+      <div className="flex items-stretch border-b border-zinc-100">
+        <div className="w-20 border-r border-zinc-100 flex items-center justify-center p-5">
+          <Skeleton className="h-8 w-8" />
+        </div>
+        <div className="flex-1 p-5 space-y-3">
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="h-9 w-24" />
+        </div>
       </div>
-      <Skeleton className="h-3 w-full" />
-      <Skeleton className="h-4 w-3/4" />
-      <div className="flex gap-6">
-        <Skeleton className="h-3 w-24" />
-        <Skeleton className="h-3 w-20" />
+      <div className="grid grid-cols-2 divide-x divide-zinc-100">
+        <div className="p-4"><Skeleton className="h-6 w-16" /></div>
+        <div className="p-4"><Skeleton className="h-6 w-16" /></div>
       </div>
     </div>
   );
@@ -162,46 +152,58 @@ function WeatherWidget({ summary }: { summary: WeatherSummary }) {
   const Icon = getWeatherIcon(summary.condition);
   return (
     <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="border border-zinc-100 bg-zinc-50/50 p-8 space-y-6"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: 'easeOut' }}
+      className="border border-zinc-200 bg-white"
     >
-      {/* Condition + forecast/reference badge */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Icon className="w-6 h-6 text-zinc-500 flex-shrink-0" />
-          <span className="text-base font-light text-zinc-800">{summary.condition}</span>
+      {/* Hero — icon panel + condition + big temperature */}
+      <div className="flex items-stretch border-b border-zinc-100">
+        <div className="flex w-20 shrink-0 items-center justify-center border-r border-zinc-100 bg-zinc-50/60">
+          <Icon className="w-9 h-9 text-zinc-400" strokeWidth={1.25} />
         </div>
-        <span className="text-[11px] uppercase tracking-widest text-zinc-300 font-bold shrink-0">
-          {summary.is_forecast ? 'Forecast' : 'Reference'}
-        </span>
+        <div className="flex-1 p-5">
+          <div className="flex items-start justify-between gap-2">
+            <span className="text-xs font-light leading-tight text-zinc-500">{summary.condition}</span>
+            <span className="shrink-0 text-[9px] font-bold uppercase tracking-[0.2em] text-zinc-300">
+              {summary.is_forecast ? 'Forecast' : 'Reference'}
+            </span>
+          </div>
+          <div className="mt-3 flex items-baseline gap-2">
+            <span className="text-4xl font-extralight leading-none tabular-nums text-zinc-900">
+              {Math.round(summary.high_c)}°
+            </span>
+            <span className="text-sm font-light tabular-nums text-zinc-400">
+              / {Math.round(summary.low_c)}° low
+            </span>
+          </div>
+          <div className="mt-1.5 text-[10px] font-light tabular-nums text-zinc-300">
+            {Math.round(summary.high_f)}°F – {Math.round(summary.low_f)}°F
+          </div>
+        </div>
       </div>
 
-      {/* Date label — single line */}
-      <p className="text-sm text-zinc-400 font-light leading-none">{summary.date_label}</p>
-
-      {/* Temperature range low → high — single line */}
-      <div className="flex items-center gap-3">
-        <Thermometer className="w-5 h-5 text-zinc-300 flex-shrink-0" />
-        <span className="text-lg text-zinc-700 whitespace-nowrap">
-          {summary.low_c}°C – {summary.high_c}°C &nbsp;/&nbsp; {summary.low_f}°F – {summary.high_f}°F
-        </span>
+      {/* Stat strip — humidity + rain */}
+      <div className="grid grid-cols-2 divide-x divide-zinc-100">
+        <div className="flex items-center gap-3 p-4">
+          <Droplets className="w-4 h-4 shrink-0 text-zinc-300" strokeWidth={1.5} />
+          <div className="leading-none">
+            <div className="text-sm tabular-nums text-zinc-800">{summary.humidity_pct}%</div>
+            <div className="mt-1 text-[9px] font-bold uppercase tracking-widest text-zinc-300">Humidity</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 p-4">
+          <CloudRain className="w-4 h-4 shrink-0 text-zinc-300" strokeWidth={1.5} />
+          <div className="leading-none">
+            <div className="text-sm tabular-nums text-zinc-800">{summary.precipitation_pct}%</div>
+            <div className="mt-1 text-[9px] font-bold uppercase tracking-widest text-zinc-300">Rain</div>
+          </div>
+        </div>
       </div>
 
-      {/* Humidity + rain — single line */}
-      <div className="flex items-center gap-6">
-        <div className="flex items-center gap-2">
-          <Droplets className="w-5 h-5 text-zinc-300 flex-shrink-0" />
-          <span className="text-sm text-zinc-500">
-            Humidity&nbsp;<span className="text-zinc-700 font-medium">{summary.humidity_pct}%</span>
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <CloudRain className="w-5 h-5 text-zinc-300 flex-shrink-0" />
-          <span className="text-sm text-zinc-500">
-            Rain&nbsp;<span className="text-zinc-700 font-medium">{summary.precipitation_pct}%</span>
-          </span>
-        </div>
+      {/* Date label footnote */}
+      <div className="border-t border-zinc-100 px-5 py-3">
+        <p className="text-[10px] font-light leading-snug text-zinc-400">{summary.date_label}</p>
       </div>
     </motion.div>
   );
@@ -229,6 +231,13 @@ export default function Dashboard({
   weatherError,
   isWeatherLoading,
   isAuthenticated,
+  bookingContext,
+  selectedFlight,
+  selectedHotel,
+  onSelectFlight,
+  onSelectHotel,
+  onOpenFlightSearch,
+  onOpenHotelSearch,
   onBack,
   onLogin,
   onRegister,
@@ -243,10 +252,18 @@ export default function Dashboard({
   weatherError: string | null;
   isWeatherLoading: boolean;
   isAuthenticated: boolean;
+  bookingContext: BookingTripContext | null;
+  selectedFlight: FlightOption | null;
+  selectedHotel: HotelOption | null;
+  onSelectFlight: (option: FlightOption) => void;
+  onSelectHotel: (option: HotelOption) => void;
+  onOpenFlightSearch: () => void;
+  onOpenHotelSearch: () => void;
   onBack: () => void;
   onLogin: () => void;
   onRegister: () => void;
 }) {
+  const [bookingTab, setBookingTab] = useState<'flight' | 'hotel'>('flight');
   const initialTier = (savedTrip?.budget_profile || 'moderate') as TierKey;
   const [selectedTier, setSelectedTier] = useState<TierKey>(initialTier);
 
@@ -397,6 +414,111 @@ export default function Dashboard({
         </div>
       </header>
 
+      {/* ── Flights & Stays: search bars + selectable options ── */}
+      {bookingContext && (
+        <section className="mb-28">
+          <div className="flex items-baseline justify-between mb-8">
+            <h2 className="text-4xl font-light tracking-tight text-zinc-950">Flights &amp; Stays.</h2>
+            <span className="text-[10px] uppercase tracking-[0.3em] font-bold text-zinc-300">Choose &amp; Save</span>
+          </div>
+
+          {/* Current selection summary */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-zinc-100 border border-zinc-100 mb-10">
+            <div className="bg-white p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <Plane className="w-4 h-4 text-zinc-400" strokeWidth={1.5} />
+                <span className="text-[10px] uppercase tracking-[0.25em] font-semibold text-zinc-400">Selected Flight</span>
+              </div>
+              {selectedFlight ? (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-zinc-900">{selectedFlight.airline}</div>
+                    <div className="text-[11px] text-zinc-400">
+                      {selectedFlight.origin}–{selectedFlight.destination} · {selectedFlight.stops <= 0 ? 'Direct' : `${selectedFlight.stops} stop(s)`}
+                    </div>
+                  </div>
+                  <div className="text-xl font-light flex items-center gap-2">
+                    <Check className="w-4 h-4 text-emerald-600" />
+                    ${selectedFlight.price.toFixed(0)}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-400 font-light">No flight selected yet.</p>
+              )}
+            </div>
+            <div className="bg-white p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <BedDouble className="w-4 h-4 text-zinc-400" strokeWidth={1.5} />
+                <span className="text-[10px] uppercase tracking-[0.25em] font-semibold text-zinc-400">Selected Hotel</span>
+              </div>
+              {selectedHotel ? (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-zinc-900 truncate">{selectedHotel.name}</div>
+                    <div className="text-[11px] text-zinc-400">
+                      {selectedHotel.stars}★ · {selectedHotel.nights} night(s)
+                    </div>
+                  </div>
+                  <div className="text-xl font-light flex items-center gap-2">
+                    <Check className="w-4 h-4 text-emerald-600" />
+                    ${selectedHotel.price.toFixed(0)}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-400 font-light">No hotel selected yet.</p>
+              )}
+            </div>
+          </div>
+
+          {/* Tabs: separate flight vs hotel search */}
+          <div className="flex items-center justify-between border-b border-zinc-100 mb-8">
+            <div className="flex">
+              <button
+                onClick={() => setBookingTab('flight')}
+                className={`flex items-center gap-2 px-5 py-3 text-xs uppercase tracking-widest font-medium transition-colors border-b-2 -mb-px ${
+                  bookingTab === 'flight' ? 'border-zinc-950 text-zinc-950' : 'border-transparent text-zinc-400 hover:text-zinc-700'
+                }`}
+              >
+                <Plane className="w-4 h-4" /> Flights
+              </button>
+              <button
+                onClick={() => setBookingTab('hotel')}
+                className={`flex items-center gap-2 px-5 py-3 text-xs uppercase tracking-widest font-medium transition-colors border-b-2 -mb-px ${
+                  bookingTab === 'hotel' ? 'border-zinc-950 text-zinc-950' : 'border-transparent text-zinc-400 hover:text-zinc-700'
+                }`}
+              >
+                <BedDouble className="w-4 h-4" /> Hotels
+              </button>
+            </div>
+            <button
+              onClick={bookingTab === 'flight' ? onOpenFlightSearch : onOpenHotelSearch}
+              className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-medium text-zinc-400 hover:text-zinc-950 transition-colors"
+            >
+              Full {bookingTab === 'flight' ? 'flight' : 'hotel'} search
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {bookingTab === 'flight' ? (
+            <BookingSearch
+              mode="flight"
+              variant="embedded"
+              trip={bookingContext}
+              selectedFlightId={selectedFlight?.id ?? null}
+              onSelectFlight={onSelectFlight}
+            />
+          ) : (
+            <BookingSearch
+              mode="hotel"
+              variant="embedded"
+              trip={bookingContext}
+              selectedHotelId={selectedHotel?.id ?? null}
+              onSelectHotel={onSelectHotel}
+            />
+          )}
+        </section>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-y-24 gap-x-12">
 
         {/* ── Left column: Gemini trip plan content ── */}
@@ -431,29 +553,7 @@ export default function Dashboard({
                 </div>
               </div>
 
-              <div className="space-y-8 pt-20 border-t border-zinc-50">
-                <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-300">Transit Protocols</label>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-zinc-100 border border-zinc-100">
-                  {plan.tickets.map((ticket, idx) => (
-                    <div key={idx} className="bg-white p-8 space-y-6">
-                      <div className="flex justify-between items-start">
-                        <div className="text-xs uppercase tracking-widest font-bold">{ticket.company}</div>
-                        <div className="text-xl font-light tracking-tight">{ticket.price}</div>
-                      </div>
-                      <ul className="space-y-2">
-                        {ticket.pros.map((pro, i) => (
-                          <li key={i} className="text-[11px] text-zinc-400 flex items-center gap-3">
-                            <div className="w-1 h-1 bg-zinc-200 rounded-full" />
-                            {pro}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-8 pt-20 border-t border-zinc-50">
+              <div className="space-y-8">
                 <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-300">Curated Interest Points</label>
                 <div className="space-y-12">
                   {plan.places.map((place, idx) => (

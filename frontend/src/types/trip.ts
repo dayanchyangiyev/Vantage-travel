@@ -21,8 +21,55 @@ export interface SavedTrip {
   interests: string[];
   engine_output: TripPlan;
   pricing_snapshot?: DynamicTierQuote | Record<string, unknown>;
+  selected_flight?: FlightOption | null;
+  selected_hotel?: HotelOption | null;
   created_at: string;
   updated_at: string;
+}
+
+export type TierKey = 'cheapest' | 'affordable' | 'moderate' | 'luxury';
+
+export interface FlightOption {
+  id: string;
+  airline: string;
+  price: number;
+  currency: string;
+  stops: number;
+  duration_minutes: number;
+  departure_time: string;
+  arrival_time: string;
+  origin: string;
+  destination: string;
+  provider: string;
+}
+
+export interface HotelOption {
+  id: string;
+  name: string;
+  price: number;
+  currency: string;
+  nights: number;
+  stars: number;
+  rating: number;
+  board_name: string;
+  refundable: boolean;
+  thumbnail: string;
+  address: string;
+}
+
+export interface CategorizedFlightOptions {
+  origin: string;
+  destination: string;
+  currency: string;
+  tiers: Record<TierKey, FlightOption[]>;
+}
+
+export interface CategorizedHotelOptions {
+  destination_city: string;
+  destination_country: string;
+  currency: string;
+  nights: number;
+  tiers: Record<TierKey, HotelOption[]>;
 }
 
 export interface DynamicTierBreakdown {

@@ -14,10 +14,21 @@ from .models import Trip
 from .serializers import (
     BudgetEvaluationInputSerializer,
     BudgetTierQuerySerializer,
+    FlightSearchQuerySerializer,
+    HotelSearchQuerySerializer,
     TripSerializer,
     WeatherQuerySerializer,
 )
-from .services import DynamicPricingInput, build_dynamic_tier_quotes, evaluate_dynamic_budget, fetch_destination_weather
+from .services import (
+    DynamicPricingInput,
+    FlightSearchInput,
+    HotelSearchInput,
+    build_dynamic_tier_quotes,
+    evaluate_dynamic_budget,
+    fetch_destination_weather,
+    search_flight_options,
+    search_hotel_options,
+)
 from .api_logging import log_api_response
 
 
@@ -190,6 +201,48 @@ def destination_weather(request):
     return Response(result, status=status.HTTP_200_OK)
 
 
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def flight_search(request):
+    serializer = FlightSearchQuerySerializer(data=request.query_params)
+    serializer.is_valid(raise_exception=True)
+    payload = serializer.validated_data
+    search_input = FlightSearchInput(
+        origin_city=payload["origin_city"],
+        destination_city=payload["destination_city"],
+        departure_date=payload["departure_date"].isoformat(),
+        return_date=payload["return_date"].isoformat(),
+        adults=payload["adults"],
+        currency=payload["currency"],
+    )
+    try:
+        result = search_flight_options(search_input)
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(result, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def hotel_search(request):
+    serializer = HotelSearchQuerySerializer(data=request.query_params)
+    serializer.is_valid(raise_exception=True)
+    payload = serializer.validated_data
+    search_input = HotelSearchInput(
+        destination_city=payload["destination_city"],
+        destination_country=payload["destination_country"],
+        check_in=payload["check_in"].isoformat(),
+        check_out=payload["check_out"].isoformat(),
+        adults=payload["adults"],
+        currency=payload["currency"],
+    )
+    try:
+        result = search_hotel_options(search_input)
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(result, status=status.HTTP_200_OK)
+
+
 class TripListCreateView(generics.ListCreateAPIView):
     serializer_class = TripSerializer
     permission_classes = (IsAuthenticated,)
@@ -199,6 +252,16 @@ class TripListCreateView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+
+class TripDetailView(generics.RetrieveUpdateAPIView):
+    """Retrieve or update a single trip — used to PATCH the chosen flight/hotel."""
+
+    serializer_class = TripSerializer
+    permission_classes = (IsAuthenticated,)
+
+    def get_queryset(self):
+        return Trip.objects.filter(user=self.request.user)
 
 
 class CurrentTripView(generics.RetrieveAPIView):

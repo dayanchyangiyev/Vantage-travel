@@ -33,9 +33,10 @@ PASSWORD_HASHERS = [
 LOGGING = {}
 
 # Stub API credentials — values don't matter since HTTP is mocked
-SERPAPI_API_KEY = "test-serpapi-key"
-SERPAPI_BASE_URL = "https://serpapi.com/search.json"
 GOOGLE_PLACES_API_KEY = "test-places-key"
 GOOGLE_PLACES_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
 GEONAMES_USERNAME = "test-geonames-user"
 GOOGLE_MAPS_API_KEY = "test-maps-key"
+NUITEE_API_KEY = "test-nuitee-key"
+NUITEE_PUBLIC_KEY = "test-nuitee-public-key"
+NUITEE_BASE_URL = "https://api.liteapi.travel/v3.0"

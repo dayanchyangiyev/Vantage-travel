@@ -10,7 +10,7 @@ class TestGoogleWeatherProvider:
     @pytest.fixture
     def mock_settings(self, monkeypatch):
         monkeypatch.setattr(settings, "GOOGLE_WEATHER_API_KEY", "test_weather_key")
-        monkeypatch.setattr(settings, "GEONAMES_USERNAME", "test_geonames_user")
+        monkeypatch.setattr(settings, "GOOGLE_PLACES_API_KEY", "test_places_key")
         monkeypatch.setattr(
             settings,
             "GOOGLE_WEATHER_BASE_URL",
@@ -23,22 +23,22 @@ class TestGoogleWeatherProvider:
 
     def test_geocode_success(self, mock_settings, mock_http_json):
         mock_http_json.return_value = {
-            "geonames": [{"lat": "48.8566", "lng": "2.3522"}]
+            "places": [{"location": {"latitude": 48.8566, "longitude": 2.3522}}]
         }
         provider = GoogleWeatherProvider()
         lat, lng = provider._geocode("Paris", "France")
-        
+
         assert lat == 48.8566
         assert lng == 2.3522
         mock_http_json.assert_called_once()
         args, kwargs = mock_http_json.call_args
-        assert kwargs["params"]["q"] == "Paris, France"
-        assert kwargs["params"]["username"] == "test_geonames_user"
+        assert kwargs["payload"]["textQuery"] == "Paris, France"
+        assert kwargs["headers"]["X-Goog-Api-Key"] == "test_places_key"
 
     def test_geocode_no_results(self, mock_settings, mock_http_json):
-        mock_http_json.return_value = {"geonames": []}
+        mock_http_json.return_value = {"places": []}
         provider = GoogleWeatherProvider()
-        
+
         with pytest.raises(ValueError, match="Cannot geocode 'Nowhere, NullIsland'"):
             provider._geocode("Nowhere", "NullIsland")
 
@@ -128,6 +128,18 @@ class TestGoogleWeatherProvider:
         assert result["is_forecast"] is True
         assert result["high_c"] == 30.0
         assert result["condition"] == "Clear"
+
+    def test_fetch_summary_unsupported_location_404(self, mock_settings, mock_http_json, mocker):
+        from urllib.error import HTTPError
+
+        mocker.patch.object(GoogleWeatherProvider, "_geocode", return_value=(35.6764, 139.65))
+        mock_http_json.side_effect = HTTPError(
+            "url", 404, "Not Found", {}, None
+        )
+
+        provider = GoogleWeatherProvider()
+        with pytest.raises(ValueError, match="isn't available for Tokyo, Japan"):
+            provider.fetch_summary("Tokyo", "Japan")
 
     def test_fetch_destination_weather_helper(self, mocker):
         mock_summary = mocker.patch.object(GoogleWeatherProvider, "fetch_summary", return_value={"mock": "data"})

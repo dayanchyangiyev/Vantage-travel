@@ -5,6 +5,7 @@ import re
 import time
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_FLOOR
@@ -268,487 +269,6 @@ def _coerce_iata_code(city_or_code: str) -> str | None:
     return token if len(token) == 3 and token.isalpha() else None
 
 
-class SerpApiClient:
-    def __init__(self):
-        self.base_url = settings.SERPAPI_BASE_URL.rstrip("/")
-        self.api_key = settings.SERPAPI_API_KEY
-
-    def search(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        if not self.api_key:
-            raise ValueError("SERPAPI_API_KEY is missing.")
-        merged = dict(params)
-        merged["api_key"] = self.api_key
-        return _http_request_json(
-            method="GET",
-            url=self.base_url,
-            params=merged,
-        )
-
-
-def _extract_iata_codes(node: Any) -> List[str]:
-    found: List[str] = []
-    if isinstance(node, dict):
-        for key, value in node.items():
-            key_lower = key.lower()
-            if key_lower in {"id", "airport_code", "iata", "iata_code"} and isinstance(value, str):
-                code = value.strip().upper()
-                if len(code) == 3 and code.isalpha():
-                    found.append(code)
-            found.extend(_extract_iata_codes(value))
-    elif isinstance(node, list):
-        for item in node:
-            found.extend(_extract_iata_codes(item))
-    return found
-
-
-class SerpApiFlightProvider:
-    def __init__(self):
-        self.client = SerpApiClient()
-
-    def _resolve_location_to_airport(self, city_or_code: str) -> str:
-        iata = _coerce_iata_code(city_or_code)
-        if iata:
-            return iata
-
-        response = self.client.search(
-            {
-                "engine": "google_flights_autocomplete",
-                "q": city_or_code,
-                "hl": "en",
-                "gl": "us",
-            }
-        )
-        codes = _extract_iata_codes(response)
-        if not codes:
-            raise ValueError(f"Unable to resolve location to airport code: {city_or_code}")
-        return codes[0]
-
-    def fetch_prices(
-        self,
-        origin_city: str,
-        destination_city: str,
-        departure_date: str,
-        return_date: str,
-        adults: int,
-        currency: str,
-    ) -> List[Decimal]:
-        origin_code = self._resolve_location_to_airport(origin_city)
-        destination_code = self._resolve_location_to_airport(destination_city)
-
-        response = self.client.search(
-            {
-                "engine": "google_flights",
-                "departure_id": origin_code,
-                "arrival_id": destination_code,
-                "outbound_date": departure_date,
-                "return_date": return_date,
-                "adults": adults,
-                "currency": currency,
-                "hl": "en",
-                "gl": "us",
-            }
-        )
-
-        prices: List[Decimal] = []
-        for key in ("best_flights", "other_flights"):
-            for offer in response.get(key, []):
-                price = _safe_decimal(offer.get("price"))
-                if price and price > 0:
-                    prices.append(price)
-
-        if not prices:
-            fallback = [p for p in _extract_numeric_candidates(response) if p > 0]
-            if not fallback:
-                raise ValueError("SerpAPI flights returned no usable flight prices.")
-            return fallback
-        return prices
-
-    @staticmethod
-    def _extract_prices(response: Dict[str, Any]) -> List[Decimal]:
-        prices: List[Decimal] = []
-        for key in ("best_flights", "other_flights"):
-            for offer in response.get(key, []):
-                price = _safe_decimal(offer.get("price"))
-                if price and price > 0:
-                    prices.append(price)
-        if prices:
-            return prices
-        return [p for p in _extract_numeric_candidates(response) if p > 0]
-
-    def _search_prices(self, params: Dict[str, Any]) -> List[Decimal]:
-        response = self.client.search(params)
-        return self._extract_prices(response)
-
-    def fetch_tier_prices(
-        self,
-        origin_city: str,
-        destination_city: str,
-        departure_date: str,
-        return_date: str,
-        adults: int,
-        currency: str,
-    ) -> Dict[str, Decimal]:
-        origin_code = self._resolve_location_to_airport(origin_city)
-        destination_code = self._resolve_location_to_airport(destination_city)
-        base = {
-            "engine": "google_flights",
-            "departure_id": origin_code,
-            "arrival_id": destination_code,
-            "outbound_date": departure_date,
-            "return_date": return_date,
-            "adults": adults,
-            "currency": currency,
-            "hl": "en",
-            "gl": "us",
-            "sort_by": 2,  # price sort for stable tier buckets
-            "show_hidden": True,
-        }
-
-        # Segmented datasets by travel class to avoid collapsing all tiers
-        # into a single economy-like market slice.
-        tier_query_sets: Dict[str, List[Dict[str, Any]]] = {
-            "cheapest": [{"travel_class": 1, "stops": 0}],
-            "affordable": [{"travel_class": 1, "stops": 2}, {"travel_class": 2, "stops": 0}],
-            "moderate": [{"travel_class": 2, "stops": 0}],
-            "luxury": [{"travel_class": 3, "stops": 0}, {"travel_class": 4, "stops": 0}],
-        }
-
-        tier_buckets: Dict[str, List[Decimal]] = {tier: [] for tier in TIER_ORDER}
-        global_pool: List[Decimal] = []
-        for tier in TIER_ORDER:
-            for query_patch in tier_query_sets[tier]:
-                try:
-                    prices = self._search_prices({**base, **query_patch})
-                except Exception:
-                    continue
-                valid_prices = [p for p in prices if p > 0]
-                if valid_prices:
-                    tier_buckets[tier].extend(valid_prices)
-                    global_pool.extend(valid_prices)
-
-        if not global_pool:
-            raise ValueError("SerpAPI flights returned no usable segmented prices.")
-
-        tiers: Dict[str, Decimal] = {}
-        for tier in TIER_ORDER:
-            source = sorted(tier_buckets[tier]) if tier_buckets[tier] else sorted(global_pool)
-            tiers[tier] = _tier_value_from_sorted(source, TIER_PERCENTILES[tier])
-
-        # Ensure non-decreasing tier ordering even when sparse data appears.
-        last = Decimal("0")
-        for tier in TIER_ORDER:
-            if tiers[tier] < last:
-                tiers[tier] = last
-            last = tiers[tier]
-        return tiers
-
-
-class SerpApiHotelProvider:
-    def __init__(self):
-        self.client = SerpApiClient()
-
-    def fetch_prices(
-        self,
-        destination_city: str,
-        destination_country: str,
-        check_in: str,
-        check_out: str,
-        adults: int,
-        currency: str,
-        trip_duration_days: int,
-    ) -> List[Decimal]:
-        query = f"{destination_city}, {destination_country}"
-        offers_response = self.client.search(
-            {
-                "engine": "google_hotels",
-                "q": query,
-                "check_in_date": check_in,
-                "check_out_date": check_out,
-                "adults": adults,
-                "currency": currency,
-                "hl": "en",
-                "gl": "us",
-                "sort_by": 3,  # lowest price first
-            }
-        )
-
-        daily_prices: List[Decimal] = []
-        for property_item in offers_response.get("properties", []):
-            amount = (
-                _safe_decimal(
-                    property_item.get("rate_per_night", {}).get("extracted_lowest")
-                )
-                or _safe_decimal(
-                    property_item.get("rate_per_night", {}).get("extracted_before_taxes_fees")
-                )
-                or _safe_decimal(property_item.get("extracted_price"))
-                or _safe_decimal(property_item.get("price"))
-            )
-            if amount and amount > 0:
-                daily_prices.append(amount)
-
-        for ad_item in offers_response.get("ads", []):
-            amount = _safe_decimal(ad_item.get("extracted_price") or ad_item.get("price"))
-            if amount and amount > 0:
-                daily_prices.append(amount)
-
-        filtered = [p for p in daily_prices if p > 0]
-        if not filtered:
-            fallback = [
-                p for p in _extract_numeric_candidates(offers_response) if p > 0
-            ]
-            if not fallback:
-                raise ValueError("SerpAPI hotels returned no usable hotel prices.")
-            return fallback
-        return filtered
-
-    @staticmethod
-    def _extract_prices(response: Dict[str, Any]) -> List[Decimal]:
-        daily_prices: List[Decimal] = []
-        for property_item in response.get("properties", []):
-            amount = (
-                _safe_decimal(
-                    property_item.get("rate_per_night", {}).get("extracted_lowest")
-                )
-                or _safe_decimal(
-                    property_item.get("rate_per_night", {}).get("extracted_before_taxes_fees")
-                )
-                or _safe_decimal(property_item.get("extracted_price"))
-                or _safe_decimal(property_item.get("price"))
-            )
-            if amount and amount > 0:
-                daily_prices.append(amount)
-
-        for ad_item in response.get("ads", []):
-            amount = _safe_decimal(ad_item.get("extracted_price") or ad_item.get("price"))
-            if amount and amount > 0:
-                daily_prices.append(amount)
-
-        if daily_prices:
-            return daily_prices
-        return [p for p in _extract_numeric_candidates(response) if p > 0]
-
-    def _search_prices(self, params: Dict[str, Any]) -> List[Decimal]:
-        response = self.client.search(params)
-        return self._extract_prices(response)
-
-    def fetch_tier_prices(
-        self,
-        destination_city: str,
-        destination_country: str,
-        check_in: str,
-        check_out: str,
-        adults: int,
-        currency: str,
-    ) -> Dict[str, Decimal]:
-        query = f"{destination_city}, {destination_country}"
-        base = {
-            "engine": "google_hotels",
-            "q": query,
-            "check_in_date": check_in,
-            "check_out_date": check_out,
-            "adults": adults,
-            "currency": currency,
-            "hl": "en",
-            "gl": "us",
-            "sort_by": 3,
-        }
-
-        # Segmented hotel subsets by hotel class/rating to produce materially
-        # different distributions for each preference tier.
-        tier_query_sets: Dict[str, List[Dict[str, Any]]] = {
-            "cheapest": [{"hotel_class": "2,3", "sort_by": 3}],
-            "affordable": [{"hotel_class": "3,4", "sort_by": 3}],
-            "moderate": [{"hotel_class": "4", "rating": 8}],
-            "luxury": [{"hotel_class": "5", "rating": 9}, {"hotel_class": "5", "sort_by": 8}],
-        }
-
-        tier_buckets: Dict[str, List[Decimal]] = {tier: [] for tier in TIER_ORDER}
-        global_pool: List[Decimal] = []
-        for tier in TIER_ORDER:
-            for query_patch in tier_query_sets[tier]:
-                try:
-                    prices = self._search_prices({**base, **query_patch})
-                except Exception:
-                    continue
-                valid_prices = [p for p in prices if p > 0]
-                if valid_prices:
-                    tier_buckets[tier].extend(valid_prices)
-                    global_pool.extend(valid_prices)
-
-        if not global_pool:
-            raise ValueError("SerpAPI hotels returned no usable segmented prices.")
-
-        tiers: Dict[str, Decimal] = {}
-        for tier in TIER_ORDER:
-            source = sorted(tier_buckets[tier]) if tier_buckets[tier] else sorted(global_pool)
-            tiers[tier] = _tier_value_from_sorted(source, TIER_PERCENTILES[tier])
-
-        last = Decimal("0")
-        for tier in TIER_ORDER:
-            if tiers[tier] < last:
-                tiers[tier] = last
-            last = tiers[tier]
-        return tiers
-
-
-class LocalCostProvider:
-    def __init__(self):
-        self.base_url = getattr(
-            settings,
-            "GOOGLE_PLACES_TEXT_SEARCH_URL",
-            "https://places.googleapis.com/v1/places:searchText",
-        ).rstrip("/")
-        self.api_key = getattr(settings, "GOOGLE_PLACES_API_KEY", "") or getattr(
-            settings,
-            "GOOGLE_MAPS_API_KEY",
-            "",
-        )
-
-    @staticmethod
-    def _money_to_decimal(money: Dict[str, Any] | None) -> Decimal | None:
-        if not isinstance(money, dict):
-            return None
-        units = _safe_decimal(money.get("units")) or Decimal("0")
-        nanos = _safe_decimal(money.get("nanos")) or Decimal("0")
-        return units + (nanos / Decimal("1000000000"))
-
-    @staticmethod
-    def _mid_price_from_range(price_range: Dict[str, Any] | None) -> Decimal | None:
-        if not isinstance(price_range, dict):
-            return None
-        start_price = LocalCostProvider._money_to_decimal(price_range.get("startPrice"))
-        end_price = LocalCostProvider._money_to_decimal(price_range.get("endPrice"))
-        if start_price is None and end_price is None:
-            return None
-        if start_price is not None and end_price is not None and end_price > start_price:
-            return (start_price + end_price) / Decimal("2")
-        if start_price is not None:
-            return start_price * Decimal("1.30")
-        if end_price is not None:
-            return end_price
-        return None
-
-    @staticmethod
-    def _price_level_coeff(level: str | None) -> Decimal:
-        price_map = {
-            "PRICE_LEVEL_FREE": Decimal("0.5"),
-            "PRICE_LEVEL_INEXPENSIVE": Decimal("1.0"),
-            "PRICE_LEVEL_MODERATE": Decimal("2.0"),
-            "PRICE_LEVEL_EXPENSIVE": Decimal("3.0"),
-            "PRICE_LEVEL_VERY_EXPENSIVE": Decimal("4.0"),
-        }
-        return price_map.get((level or "").strip(), Decimal("1.8"))
-
-    def _places_text_search(
-        self,
-        text_query: str,
-        max_result_count: int,
-    ) -> List[Dict[str, Any]]:
-        if not self.api_key:
-            raise ValueError("GOOGLE_PLACES_API_KEY (or GOOGLE_MAPS_API_KEY) is missing.")
-
-        headers = {
-            "Content-Type": "application/json",
-            "X-Goog-Api-Key": self.api_key,
-            "X-Goog-FieldMask": "places.displayName,places.primaryType,places.priceLevel,places.priceRange,places.rating",
-        }
-        try:
-            response = _http_request_json(
-                method="POST",
-                url=self.base_url,
-                headers=headers,
-                payload={
-                    "textQuery": text_query,
-                    "maxResultCount": max_result_count,
-                },
-            )
-            places = response.get("places", [])
-            return places if isinstance(places, list) else []
-        except Exception as e:
-            print(f"Google Places API request failed: {e}")
-            return []
-
-    def _extract_costs(
-        self,
-        places: List[Dict[str, Any]],
-        base_anchor: Decimal,
-    ) -> List[Decimal]:
-        # priceRange is intentionally ignored: Google returns it in local currency
-        # with no reliable conversion, so treating it as USD gives absurd results
-        # (e.g. 2000 EGP for a Cairo restaurant reads as $2000). priceLevel is a
-        # market-relative categorical label and is currency-agnostic.
-        values: List[Decimal] = []
-        for place in places:
-            if not isinstance(place, dict):
-                continue
-            coeff = self._price_level_coeff(place.get("priceLevel"))
-            values.append(base_anchor * coeff)
-        return [v for v in values if v > 0]
-
-    # Fixed daily public-transit estimates per tier. Places API "transport" searches
-    # return tour operators and private car services, not per-ride fares, so these
-    # are hardcoded. All tiers represent public transit (bus/metro/tram); luxury
-    # adds frequent taxi use on top of transit — no private car rental included.
-    _DAILY_TRANSPORT = {
-        "cheapest": Decimal("3"),    # bus / metro with transfers
-        "affordable": Decimal("6"),  # metro daily pass
-        "moderate": Decimal("10"),   # metro + occasional taxi
-        "luxury": Decimal("18"),     # frequent taxi + premium transit
-    }
-
-    def fetch_daily_tier_costs(
-        self, destination_city: str, destination_country: str, currency: str
-    ) -> Dict[str, Decimal]:
-        if not self.base_url:
-            raise ValueError("GOOGLE_PLACES_TEXT_SEARCH_URL is missing.")
-
-        city_query = f"{destination_city}, {destination_country}"
-        restaurants = self._places_text_search(f"restaurants in {city_query}", 20)
-        cafes = self._places_text_search(f"cafes in {city_query}", 20)
-
-        # Transport is excluded from Places queries: the API surfaces tour operators
-        # and private car services whose prices are not per-ride transit fares.
-        food_values = self._extract_costs(restaurants + cafes, base_anchor=Decimal("10"))
-
-        if not food_values:
-            raise ValueError("Google Places returned no usable local-living signals.")
-
-        food_pool = sorted(food_values)
-
-        food_cheapest = _tier_value_from_sorted(food_pool, Decimal("0.15"))
-        food_affordable = _tier_value_from_sorted(food_pool, Decimal("0.40"))
-        food_moderate = _tier_value_from_sorted(food_pool, Decimal("0.60"))
-        food_luxury = _tier_value_from_sorted(food_pool, Decimal("0.90"))
-
-        t = self._DAILY_TRANSPORT
-        # Daily per-traveler local costs (meals + local transport + incidentals).
-        tiers = {
-            "cheapest": (food_cheapest * Decimal("1.7"))
-            + t["cheapest"]
-            + Decimal("6"),
-            "affordable": (food_affordable * Decimal("2.0"))
-            + t["affordable"]
-            + Decimal("10"),
-            "moderate": (food_moderate * Decimal("2.3"))
-            + t["moderate"]
-            + Decimal("16"),
-            "luxury": (food_luxury * Decimal("2.8"))
-            + t["luxury"]
-            + Decimal("28"),
-        }
-
-        ordered: Dict[str, Decimal] = {}
-        last_value = Decimal("0")
-        for tier in TIER_ORDER:
-            value = tiers[tier]
-            if value < last_value:
-                value = last_value
-            ordered[tier] = value
-            last_value = value
-        return ordered
-
-
 class GoogleWeatherProvider:
     def __init__(self):
         self.api_key = getattr(settings, "GOOGLE_WEATHER_API_KEY", "")
@@ -757,27 +277,41 @@ class GoogleWeatherProvider:
             "GOOGLE_WEATHER_BASE_URL",
             "https://weather.googleapis.com/v1/forecast/days:lookup",
         )
-        self.geonames_username = getattr(settings, "GEONAMES_USERNAME", "")
+        # Geocoding piggybacks on the Google Places key (already used by
+        # LocalCostProvider). GeoNames is intentionally not used here: its free
+        # webservice account must be separately enabled and silently 401s.
+        self.places_url = getattr(
+            settings,
+            "GOOGLE_PLACES_TEXT_SEARCH_URL",
+            "https://places.googleapis.com/v1/places:searchText",
+        ).rstrip("/")
+        self.places_api_key = getattr(settings, "GOOGLE_PLACES_API_KEY", "") or getattr(
+            settings,
+            "GOOGLE_MAPS_API_KEY",
+            "",
+        )
 
     def _geocode(self, city: str, country: str) -> tuple[float, float]:
-        if not self.geonames_username:
-            raise ValueError("GEONAMES_USERNAME is required for weather geocoding.")
+        if not self.places_api_key:
+            raise ValueError("GOOGLE_PLACES_API_KEY is required for weather geocoding.")
         data = _http_request_json(
-            "GET",
-            "https://secure.geonames.org/searchJSON",
-            params={
-                "q": f"{city}, {country}",
-                "maxRows": "1",
-                "username": self.geonames_username,
-                "lang": "en",
-                "style": "SHORT",
-                "featureClass": "P",
+            "POST",
+            self.places_url,
+            headers={
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": self.places_api_key,
+                "X-Goog-FieldMask": "places.location",
             },
+            payload={"textQuery": f"{city}, {country}", "maxResultCount": 1},
         )
-        places = data.get("geonames", [])
+        places = data.get("places", [])
         if not places:
             raise ValueError(f"Cannot geocode '{city}, {country}'.")
-        return float(places[0]["lat"]), float(places[0]["lng"])
+        location = places[0].get("location", {})
+        lat, lng = location.get("latitude"), location.get("longitude")
+        if lat is None or lng is None:
+            raise ValueError(f"Cannot geocode '{city}, {country}'.")
+        return float(lat), float(lng)
 
     def fetch_summary(
         self,
@@ -798,16 +332,27 @@ class GoogleWeatherProvider:
         days_until_trip = (trip_start - today).days if trip_start else 0
         within_forecast = bool(trip_start and 0 <= days_until_trip < 10)
 
-        data = _http_request_json(
-            "GET",
-            self.base_url,
-            params={
-                "location.latitude": lat,
-                "location.longitude": lng,
-                "days": 10,
-                "key": self.api_key,
-            },
-        )
+        try:
+            data = _http_request_json(
+                "GET",
+                self.base_url,
+                params={
+                    "location.latitude": lat,
+                    "location.longitude": lng,
+                    "days": 10,
+                    "key": self.api_key,
+                },
+            )
+        except HTTPError as exc:
+            # Google Weather has regional coverage gaps (e.g. Japan) and returns
+            # 404 NOT_FOUND for unsupported locations. Surface that as a clear,
+            # user-facing message instead of a generic 503.
+            if exc.code == 404:
+                raise ValueError(
+                    f"Weather data isn't available for "
+                    f"{destination_city}, {destination_country} yet."
+                )
+            raise
 
         all_days = data.get("forecastDays", [])
         if not all_days:
@@ -928,6 +473,66 @@ def _normalize_duration_days(departure_date: str, return_date: str) -> int:
     return days
 
 
+# Daily local-living estimate (food, transport, incidentals) derived from the
+# nightly lodging price of each tier. LiteAPI does not return cost-of-living
+# data, so we infer it from the real, fetched hotel prices: pricier tiers imply
+# pricier daily spending, bounded by sensible floors/caps so a single luxury
+# hotel rate can't produce absurd food costs.
+_LIVING_FACTOR = {
+    "cheapest": Decimal("0.35"),
+    "affordable": Decimal("0.45"),
+    "moderate": Decimal("0.55"),
+    "luxury": Decimal("0.70"),
+}
+_LIVING_FLOOR = {
+    "cheapest": Decimal("18"),
+    "affordable": Decimal("30"),
+    "moderate": Decimal("50"),
+    "luxury": Decimal("85"),
+}
+_LIVING_CAP = {
+    "cheapest": Decimal("70"),
+    "affordable": Decimal("120"),
+    "moderate": Decimal("200"),
+    "luxury": Decimal("380"),
+}
+
+
+def _living_daily_cost(tier: str, hotel_daily: Decimal) -> Decimal:
+    value = hotel_daily * _LIVING_FACTOR[tier]
+    return min(max(value, _LIVING_FLOOR[tier]), _LIVING_CAP[tier])
+
+
+def _representative_tier_prices(
+    tiers: Dict[str, List[Dict[str, Any]]]
+) -> Dict[str, Decimal | None]:
+    """Cheapest option price in each tier, with empty tiers filled from the
+    nearest populated neighbour so the four categories stay monotonic."""
+    raw: Dict[str, Decimal | None] = {}
+    for tier in TIER_ORDER:
+        prices = [
+            _safe_decimal(option.get("price"))
+            for option in (tiers.get(tier) or [])
+        ]
+        prices = [p for p in prices if p and p > 0]
+        raw[tier] = min(prices) if prices else None
+
+    # Forward then backward fill so leading/trailing gaps borrow a real price.
+    last: Decimal | None = None
+    for tier in TIER_ORDER:
+        if raw[tier] is None:
+            raw[tier] = last
+        else:
+            last = raw[tier]
+    last = None
+    for tier in reversed(TIER_ORDER):
+        if raw[tier] is None:
+            raw[tier] = last
+        else:
+            last = raw[tier]
+    return raw
+
+
 def build_dynamic_tier_quotes(input_data: DynamicPricingInput) -> DynamicTierQuoteResult:
     if input_data.adults <= 0:
         raise ValueError("adults must be greater than zero.")
@@ -937,63 +542,51 @@ def build_dynamic_tier_quotes(input_data: DynamicPricingInput) -> DynamicTierQuo
         input_data.return_date,
     )
 
-    flight_provider = SerpApiFlightProvider()
-    hotel_provider = SerpApiHotelProvider()
-    local_provider = LocalCostProvider()
-
-    try:
-        flight_tiers = flight_provider.fetch_tier_prices(
-            origin_city=input_data.origin_city,
-            destination_city=input_data.destination_city,
-            departure_date=input_data.departure_date,
-            return_date=input_data.return_date,
-            adults=input_data.adults,
-            currency=input_data.currency,
-        )
-    except Exception:
-        # Fallback to single-query distribution when segmented fetch cannot complete.
-        flight_prices = flight_provider.fetch_prices(
-            origin_city=input_data.origin_city,
-            destination_city=input_data.destination_city,
-            departure_date=input_data.departure_date,
-            return_date=input_data.return_date,
-            adults=input_data.adults,
-            currency=input_data.currency,
-        )
-        flight_tiers = _map_values_to_tiers(flight_prices)
-
-    try:
-        hotel_tiers = hotel_provider.fetch_tier_prices(
-            destination_city=input_data.destination_city,
-            destination_country=input_data.destination_country,
-            check_in=input_data.departure_date,
-            check_out=input_data.return_date,
-            adults=input_data.adults,
-            currency=input_data.currency,
-        )
-    except Exception:
-        hotel_prices = hotel_provider.fetch_prices(
-            destination_city=input_data.destination_city,
-            destination_country=input_data.destination_country,
-            check_in=input_data.departure_date,
-            check_out=input_data.return_date,
-            adults=input_data.adults,
-            currency=input_data.currency,
-            trip_duration_days=trip_duration_days,
-        )
-        hotel_tiers = _map_values_to_tiers(hotel_prices)
-
-    local_tiers = local_provider.fetch_daily_tier_costs(
+    flight_input = FlightSearchInput(
+        origin_city=input_data.origin_city,
         destination_city=input_data.destination_city,
-        destination_country=input_data.destination_country,
+        departure_date=input_data.departure_date,
+        return_date=input_data.return_date,
+        adults=input_data.adults,
         currency=input_data.currency,
     )
+    hotel_input = HotelSearchInput(
+        destination_city=input_data.destination_city,
+        destination_country=input_data.destination_country,
+        check_in=input_data.departure_date,
+        check_out=input_data.return_date,
+        adults=input_data.adults,
+        currency=input_data.currency,
+    )
+
+    # Flights and hotels are independent network calls — run them concurrently
+    # (urllib releases the GIL during I/O) to roughly halve dashboard load time.
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        flight_future = executor.submit(
+            lambda: NuiteeFlightProvider().search_options(flight_input)
+        )
+        hotel_future = executor.submit(
+            lambda: NuiteeHotelProvider().search_options(hotel_input)
+        )
+        flight_result = flight_future.result()
+        hotel_result = hotel_future.result()
+
+    flight_prices = _representative_tier_prices(flight_result["tiers"])
+    hotel_totals = _representative_tier_prices(hotel_result["tiers"])
+
+    if all(v is None for v in flight_prices.values()):
+        raise ValueError("No flight pricing could be derived for this route.")
+    if all(v is None for v in hotel_totals.values()):
+        raise ValueError("No hotel pricing could be derived for this destination.")
+
     tiers: Dict[str, TierCostBreakdown] = {}
     duration_decimal = Decimal(trip_duration_days)
     for tier in TIER_ORDER:
-        flight_cost = flight_tiers[tier]
-        hotel_daily = hotel_tiers[tier]
-        local_daily = local_tiers[tier]
+        flight_cost = flight_prices[tier] or Decimal("0")
+        hotel_total = hotel_totals[tier] or Decimal("0")
+        # Hotel option price is the total for the stay — convert to a nightly rate.
+        hotel_daily = (hotel_total / duration_decimal) if duration_decimal else hotel_total
+        local_daily = _living_daily_cost(tier, hotel_daily)
         total_daily_living = hotel_daily + local_daily
         total_living_cost = total_daily_living * duration_decimal
         total_trip_cost = flight_cost + total_living_cost
@@ -1014,9 +607,9 @@ def build_dynamic_tier_quotes(input_data: DynamicPricingInput) -> DynamicTierQuo
         "currency": input_data.currency,
         "tiers": tiers,
         "sources": {
-            "flights": "serpapi_google_flights",
-            "hotels": "serpapi_google_hotels",
-            "local_costs": "google_places_text_search",
+            "flights": "nuitee_liteapi_flights",
+            "hotels": "nuitee_liteapi_hotels",
+            "local_costs": "derived_from_lodging",
         },
     }
 
@@ -1074,3 +667,404 @@ def evaluate_dynamic_budget(input_data: DynamicPricingInput) -> BudgetEvaluation
         },
         "pricing_snapshot": snapshot,
     }
+
+
+# ---------------------------------------------------------------------------
+# LiteAPI (Nuitee Connect) — individual flight & hotel options for selection
+#
+# Unlike build_dynamic_tier_quotes (which returns aggregate per-tier averages),
+# these providers return *individual, selectable* flight and hotel options,
+# grouped into the same four comfort tiers, 2-3 options per tier.
+# ---------------------------------------------------------------------------
+
+
+class FlightOption(TypedDict):
+    id: str
+    airline: str
+    price: float
+    currency: str
+    stops: int
+    duration_minutes: int
+    departure_time: str
+    arrival_time: str
+    origin: str
+    destination: str
+    provider: str
+
+
+class HotelOption(TypedDict):
+    id: str
+    name: str
+    price: float
+    currency: str
+    nights: int
+    stars: int
+    rating: float
+    board_name: str
+    refundable: bool
+    thumbnail: str
+    address: str
+
+
+class CategorizedFlightResult(TypedDict):
+    origin: str
+    destination: str
+    currency: str
+    tiers: Dict[str, List[FlightOption]]
+
+
+class CategorizedHotelResult(TypedDict):
+    destination_city: str
+    destination_country: str
+    currency: str
+    nights: int
+    tiers: Dict[str, List[HotelOption]]
+
+
+@dataclass(frozen=True)
+class FlightSearchInput:
+    origin_city: str
+    destination_city: str
+    departure_date: str
+    return_date: str
+    adults: int
+    currency: str = "USD"
+
+
+@dataclass(frozen=True)
+class HotelSearchInput:
+    destination_city: str
+    destination_country: str
+    check_in: str
+    check_out: str
+    adults: int
+    currency: str = "USD"
+
+
+def _bucket_options_by_price(
+    options: List[Dict[str, Any]],
+    price_key: str = "price",
+    per_tier: int = 3,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Split priced options into the four comfort tiers by price quantile.
+
+    The cheapest options land in 'cheapest' and the most expensive in 'luxury'.
+    Each tier holds up to `per_tier` options (the cheapest representatives of
+    that price band). Degrades gracefully: with fewer options than tiers, some
+    tiers stay empty rather than raising.
+    """
+    ordered = sorted(
+        (
+            o
+            for o in options
+            if (_safe_decimal(o.get(price_key)) or Decimal("0")) > 0
+        ),
+        key=lambda o: _safe_decimal(o.get(price_key)),
+    )
+    buckets: Dict[str, List[Dict[str, Any]]] = {tier: [] for tier in TIER_ORDER}
+    total = len(ordered)
+    if total == 0:
+        return buckets
+
+    bands = len(TIER_ORDER)
+    for index, option in enumerate(ordered):
+        band = min((index * bands) // total, bands - 1)
+        buckets[TIER_ORDER[band]].append(option)
+
+    return {tier: buckets[tier][:per_tier] for tier in TIER_ORDER}
+
+
+class LiteApiClient:
+    """Facade over LiteAPI (Nuitee Connect) HTTP calls.
+
+    Mirrors SerpApiClient: hides URL building, API-key header injection, and
+    response parsing. All requests flow through _http_request_json so they are
+    logged (and the key redacted) by the Observer logging layer automatically.
+    """
+
+    def __init__(self):
+        self.base_url = settings.NUITEE_BASE_URL.rstrip("/")
+        self.api_key = settings.NUITEE_API_KEY
+
+    def _headers(self) -> Dict[str, str]:
+        if not self.api_key:
+            raise ValueError("NUITEE_API_KEY is missing.")
+        return {"X-API-Key": self.api_key, "accept": "application/json"}
+
+    def post(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return _http_request_json(
+            method="POST",
+            url=f"{self.base_url}/{path.lstrip('/')}",
+            headers=self._headers(),
+            payload=payload,
+        )
+
+    def get(self, path: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        return _http_request_json(
+            method="GET",
+            url=f"{self.base_url}/{path.lstrip('/')}",
+            headers=self._headers(),
+            params=params,
+        )
+
+
+class NuiteeFlightProvider:
+    def __init__(self):
+        self.client = LiteApiClient()
+
+    def _resolve_airport(self, city_or_code: str) -> str:
+        code = _coerce_iata_code(city_or_code)
+        if code:
+            return code
+
+        query = city_or_code.split(",")[0].strip()
+        try:
+            response = self.client.get("data/flights/airports", {"q": query})
+        except Exception as exc:
+            raise ValueError(
+                f"Unable to resolve an airport for '{city_or_code}'."
+            ) from exc
+
+        # Prefer the metro "All Airports" code (aggregates every airport in the
+        # city, so it returns the widest set of flights), then any serviceable
+        # airport, then anything valid. priority 0 < 1 < 2.
+        candidates: List[tuple[int, str]] = []
+        for group in response.get("data") or []:
+            for airport in group.get("airports", []):
+                iata = (airport.get("iata") or "").strip().upper()
+                if len(iata) != 3 or not iata.isalpha():
+                    continue
+                name = (airport.get("name") or "").lower()
+                if "all airport" in name:
+                    priority = 0
+                elif airport.get("hasAirlineService"):
+                    priority = 1
+                else:
+                    priority = 2
+                candidates.append((priority, iata))
+
+        if not candidates:
+            raise ValueError(f"Unable to resolve an airport for '{city_or_code}'.")
+        candidates.sort(key=lambda item: item[0])
+        return candidates[0][1]
+
+    @staticmethod
+    def _journey_to_option(journey: Dict[str, Any]) -> FlightOption | None:
+        offer = journey.get("cheapestOffer") or {}
+        pricing = (offer.get("pricing") or {}).get("display") or {}
+        price = _safe_decimal(pricing.get("total"))
+        if price is None or price <= 0:
+            return None
+
+        segments = journey.get("segments") or []
+        outbound = [s for s in segments if s.get("direction") == "OUTBOUND"] or segments
+        first = outbound[0] if outbound else {}
+        last = outbound[-1] if outbound else {}
+        carrier = first.get("carrier") or {}
+        provider = offer.get("provider") or {}
+        airline = (
+            carrier.get("marketingName")
+            or carrier.get("operatingName")
+            or provider.get("code")
+            or "Unknown carrier"
+        )
+        duration = (journey.get("totalDuration") or {}).get("minutes") or 0
+
+        return {
+            "id": offer.get("offerId") or journey.get("journeyKey") or "",
+            "airline": airline,
+            "price": float(price),
+            "currency": pricing.get("currency") or "USD",
+            "stops": max(len(outbound) - 1, 0),
+            "duration_minutes": int(duration),
+            "departure_time": first.get("departureTime") or "",
+            "arrival_time": last.get("arrivalTime") or "",
+            "origin": first.get("originCode") or "",
+            "destination": last.get("destinationCode") or "",
+            "provider": provider.get("code") or "nuitee",
+        }
+
+    def search_options(self, input_data: FlightSearchInput) -> CategorizedFlightResult:
+        origin_code = self._resolve_airport(input_data.origin_city)
+        destination_code = self._resolve_airport(input_data.destination_city)
+
+        legs = [
+            {
+                "origin": origin_code,
+                "destination": destination_code,
+                "date": input_data.departure_date,
+            }
+        ]
+        if input_data.return_date:
+            legs.append(
+                {
+                    "origin": destination_code,
+                    "destination": origin_code,
+                    "date": input_data.return_date,
+                }
+            )
+
+        response = self.client.post(
+            "flights/rates",
+            {
+                "legs": legs,
+                "adults": input_data.adults,
+                "currency": input_data.currency,
+            },
+        )
+
+        data = response.get("data") or []
+        journeys = data[0].get("journeys", []) if data else []
+
+        options: List[Dict[str, Any]] = []
+        seen: set[tuple] = set()
+        for journey in journeys:
+            option = self._journey_to_option(journey)
+            if not option:
+                continue
+            # Collapse identical itineraries (same carrier, price, times, stops)
+            # so each tier shows genuinely distinct flights.
+            signature = (
+                option["airline"],
+                option["price"],
+                option["departure_time"],
+                option["arrival_time"],
+                option["stops"],
+            )
+            if signature in seen:
+                continue
+            seen.add(signature)
+            options.append(option)
+
+        if not options:
+            raise ValueError(
+                "No flight options were returned for this route and dates."
+            )
+
+        return {
+            "origin": origin_code,
+            "destination": destination_code,
+            "currency": input_data.currency,
+            "tiers": _bucket_options_by_price(options),
+        }
+
+
+class NuiteeHotelProvider:
+    def __init__(self):
+        self.client = LiteApiClient()
+
+    def _hotel_directory(self, hotel_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Resolve hotel ids to display metadata (name, stars, photo, address)."""
+        if not hotel_ids:
+            return {}
+        try:
+            response = self.client.get(
+                "data/hotels", {"hotelIds": ",".join(hotel_ids)}
+            )
+        except Exception:
+            # Names are a nicety; never fail the search over them.
+            return {}
+        directory: Dict[str, Dict[str, Any]] = {}
+        for hotel in response.get("data") or []:
+            hotel_id = hotel.get("id")
+            if hotel_id:
+                directory[hotel_id] = hotel
+        return directory
+
+    @staticmethod
+    def _cheapest_offer(hotel: Dict[str, Any]) -> tuple[Decimal, Dict[str, Any]] | None:
+        """Return (price, room-type) for the cheapest offer of a hotel."""
+        best: tuple[Decimal, Dict[str, Any]] | None = None
+        for room_type in hotel.get("roomTypes") or []:
+            offer_rate = room_type.get("offerRetailRate") or {}
+            price = _safe_decimal(offer_rate.get("amount"))
+            if price is None or price <= 0:
+                # Fall back to the first rate's retail total.
+                rates = room_type.get("rates") or []
+                if rates:
+                    total = (rates[0].get("retailRate") or {}).get("total") or []
+                    if total:
+                        price = _safe_decimal(total[0].get("amount"))
+            if price is not None and price > 0:
+                if best is None or price < best[0]:
+                    best = (price, room_type)
+        return best
+
+    def search_options(self, input_data: HotelSearchInput) -> CategorizedHotelResult:
+        nights = max(
+            _normalize_duration_days(input_data.check_in, input_data.check_out), 1
+        )
+        response = self.client.post(
+            "hotels/rates",
+            {
+                "aiSearch": f"{input_data.destination_city}, {input_data.destination_country}",
+                "checkin": input_data.check_in,
+                "checkout": input_data.check_out,
+                "occupancies": [{"adults": input_data.adults}],
+                "currency": input_data.currency,
+                "guestNationality": "US",
+                "limit": 30,
+            },
+        )
+
+        hotels = response.get("data") or []
+        priced: List[tuple[str, Decimal, Dict[str, Any]]] = []
+        for hotel in hotels:
+            hotel_id = hotel.get("hotelId") or ""
+            cheapest = self._cheapest_offer(hotel)
+            if cheapest is None:
+                continue
+            price, room_type = cheapest
+            priced.append((hotel_id, price, room_type))
+
+        if not priced:
+            raise ValueError(
+                "No hotel options were returned for this destination and dates."
+            )
+
+        directory = self._hotel_directory([hid for hid, _, _ in priced if hid])
+
+        options: List[Dict[str, Any]] = []
+        for hotel_id, price, room_type in priced:
+            meta = directory.get(hotel_id, {})
+            rates = room_type.get("rates") or []
+            first_rate = rates[0] if rates else {}
+            cancellation = first_rate.get("cancellationPolicies") or {}
+            refundable_tag = (cancellation.get("refundableTag") or "").upper()
+            offer_rate = room_type.get("offerRetailRate") or {}
+
+            options.append(
+                {
+                    "id": room_type.get("offerId") or hotel_id,
+                    "name": meta.get("name") or f"Hotel {hotel_id}",
+                    "price": float(price),
+                    "currency": offer_rate.get("currency") or input_data.currency,
+                    "nights": nights,
+                    "stars": int(meta.get("stars") or 0),
+                    "rating": float(meta.get("rating") or 0),
+                    "board_name": first_rate.get("boardName") or "Room Only",
+                    "refundable": refundable_tag == "RFN",
+                    "thumbnail": meta.get("main_photo") or "",
+                    "address": meta.get("address") or "",
+                }
+            )
+
+        return {
+            "destination_city": input_data.destination_city,
+            "destination_country": input_data.destination_country,
+            "currency": input_data.currency,
+            "nights": nights,
+            "tiers": _bucket_options_by_price(options),
+        }
+
+
+def search_flight_options(input_data: FlightSearchInput) -> CategorizedFlightResult:
+    if input_data.adults <= 0:
+        raise ValueError("adults must be greater than zero.")
+    return NuiteeFlightProvider().search_options(input_data)
+
+
+def search_hotel_options(input_data: HotelSearchInput) -> CategorizedHotelResult:
+    if input_data.adults <= 0:
+        raise ValueError("adults must be greater than zero.")
+    return NuiteeHotelProvider().search_options(input_data)

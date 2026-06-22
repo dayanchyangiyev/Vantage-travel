@@ -6,18 +6,28 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { ChevronRight, ArrowLeft, User as UserIcon, LogOut } from "lucide-react";
-import { DynamicTierQuote, SavedTrip, TripInput, TripPlan, WeatherSummary } from "./types/trip";
+import { DynamicTierQuote, FlightOption, HotelOption, SavedTrip, TripInput, TripPlan, WeatherSummary } from "./types/trip";
 import { generateTripPlan } from "./lib/gemini";
 import { fetchCurrentTrip, saveTrip } from "./lib/trips";
 import { fetchDynamicTierQuote } from "./lib/dynamicPricing";
 import { fetchWeatherSummary } from "./lib/weather";
+import { saveSelection } from "./lib/search";
 import TripForm from "./components/TripForm";
 import Dashboard from "./components/Dashboard";
+import BookingSearch, { BookingTripContext } from "./components/BookingSearch";
 import Login from "./components/Login";
 import Register from "./components/Register";
 import { useAuth } from "./context/AuthContext";
 
-type Step = "landing" | "login" | "register" | "form" | "dashboard";
+type Step = "landing" | "login" | "register" | "form" | "dashboard" | "flight-search" | "hotel-search";
+
+function splitDestination(destination: string): { city: string; country: string } {
+  const parts = (destination || "").split(",").map((p) => p.trim()).filter(Boolean);
+  return {
+    city: parts[0] || destination,
+    country: parts[parts.length - 1] || destination,
+  };
+}
 
 export default function App() {
   const [step, setStep] = useState<Step>("landing");
@@ -32,6 +42,8 @@ export default function App() {
   const [isPricingLoading, setIsPricingLoading] = useState(false);
   const [isWeatherLoading, setIsWeatherLoading] = useState(false);
   const [pricingError, setPricingError] = useState<string | null>(null);
+  const [selectedFlight, setSelectedFlight] = useState<FlightOption | null>(null);
+  const [selectedHotel, setSelectedHotel] = useState<HotelOption | null>(null);
   const { isAuthenticated, token, user, logout } = useAuth();
 
   useEffect(() => {
@@ -57,6 +69,8 @@ export default function App() {
         }
 
         setSavedTrip(trip);
+        setSelectedFlight(trip?.selected_flight ?? null);
+        setSelectedHotel(trip?.selected_hotel ?? null);
         setLivePricingSnapshot(
           trip?.pricing_snapshot && "tiers" in trip.pricing_snapshot
             ? (trip.pricing_snapshot as DynamicTierQuote)
@@ -100,12 +114,52 @@ export default function App() {
     };
   }, [savedTrip]);
 
+  const bookingContext = useMemo<BookingTripContext | null>(() => {
+    const origin = currentTripInput?.originCountry || savedTrip?.origin_country || "";
+    const destination = currentTripInput?.destination || savedTrip?.destination || "";
+    const startDate = currentTripInput?.startDate || savedTrip?.start_date || "";
+    const endDate = currentTripInput?.endDate || savedTrip?.end_date || "";
+    const travelers = currentTripInput?.travelers || savedTrip?.travelers || 1;
+    if (!destination || !startDate || !endDate) {
+      return null;
+    }
+    const { city, country } = splitDestination(destination);
+    return {
+      origin,
+      destinationCity: city,
+      destinationCountry: country,
+      startDate,
+      endDate,
+      travelers,
+    };
+  }, [currentTripInput, savedTrip]);
+
+  const handleSelectFlight = (option: FlightOption) => {
+    setSelectedFlight(option);
+    if (isAuthenticated && token && savedTrip) {
+      saveSelection(token, savedTrip.id, { selected_flight: option }).catch((e) =>
+        console.error("Failed to save flight selection", e)
+      );
+    }
+  };
+
+  const handleSelectHotel = (option: HotelOption) => {
+    setSelectedHotel(option);
+    if (isAuthenticated && token && savedTrip) {
+      saveSelection(token, savedTrip.id, { selected_hotel: option }).catch((e) =>
+        console.error("Failed to save hotel selection", e)
+      );
+    }
+  };
+
   const handleStartTrip = async (input: TripInput) => {
     // Save input in case user decides to sign in / register later
     setCurrentTripInput(input);
-    
+
     // Go to dashboard immediately — no full-screen loading step
     setTripPlan(null);
+    setSelectedFlight(null);
+    setSelectedHotel(null);
     setLivePricingSnapshot(null);
     setWeatherSummary(null);
     setWeatherError(null);
@@ -200,6 +254,8 @@ export default function App() {
     setWeatherSummary(null);
     setWeatherError(null);
     setCurrentTripDates(null);
+    setSelectedFlight(null);
+    setSelectedHotel(null);
     setIsPricingLoading(false);
     setIsWeatherLoading(false);
     setPricingError(null);
@@ -403,7 +459,40 @@ export default function App() {
               weatherSummary={weatherSummary}
               weatherError={weatherError}
               isWeatherLoading={isWeatherLoading}
+              bookingContext={bookingContext}
+              selectedFlight={selectedFlight}
+              selectedHotel={selectedHotel}
+              onSelectFlight={handleSelectFlight}
+              onSelectHotel={handleSelectHotel}
+              onOpenFlightSearch={() => setStep("flight-search")}
+              onOpenHotelSearch={() => setStep("hotel-search")}
               onBack={() => setStep(isAuthenticated ? "landing" : "form")}
+            />
+          </motion.div>
+        )}
+
+        {step === "flight-search" && bookingContext && (
+          <motion.div key="flight-search" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <BookingSearch
+              mode="flight"
+              variant="full"
+              trip={bookingContext}
+              selectedFlightId={selectedFlight?.id ?? null}
+              onSelectFlight={handleSelectFlight}
+              onBack={() => setStep("dashboard")}
+            />
+          </motion.div>
+        )}
+
+        {step === "hotel-search" && bookingContext && (
+          <motion.div key="hotel-search" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <BookingSearch
+              mode="hotel"
+              variant="full"
+              trip={bookingContext}
+              selectedHotelId={selectedHotel?.id ?? null}
+              onSelectHotel={handleSelectHotel}
+              onBack={() => setStep("dashboard")}
             />
           </motion.div>
         )}

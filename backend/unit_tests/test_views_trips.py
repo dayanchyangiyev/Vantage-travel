@@ -204,9 +204,19 @@ class TestBudgetTiersView:
             "moderate": Decimal("100"),
             "luxury": Decimal("180"),
         }
-        mocker.patch("trips.services.SerpApiFlightProvider.fetch_tier_prices", return_value=tier_data)
-        mocker.patch("trips.services.SerpApiHotelProvider.fetch_tier_prices", return_value=tier_data)
-        mocker.patch("trips.services.LocalCostProvider.fetch_daily_tier_costs", return_value=local_data)
+        mocker.patch(
+            "trips.services.NuiteeFlightProvider.search_options",
+            return_value={"origin": "NYC", "destination": "PAR", "currency": "USD", "tiers": {
+                "cheapest": [{"price": 200}], "affordable": [{"price": 400}],
+                "moderate": [{"price": 700}], "luxury": [{"price": 1200}]}},
+        )
+        mocker.patch(
+            "trips.services.NuiteeHotelProvider.search_options",
+            return_value={"destination_city": "Paris", "destination_country": "France",
+                          "currency": "USD", "nights": 7, "tiers": {
+                "cheapest": [{"price": 420}], "affordable": [{"price": 700}],
+                "moderate": [{"price": 1260}], "luxury": [{"price": 2450}]}},
+        )
 
     def test_valid_request_returns_200(self, api_client, mocker):
         self._mock_providers(mocker)
@@ -246,9 +256,19 @@ class TestEvaluateBudgetView:
             "moderate": Decimal("100"),
             "luxury": Decimal("180"),
         }
-        mocker.patch("trips.services.SerpApiFlightProvider.fetch_tier_prices", return_value=tier_data)
-        mocker.patch("trips.services.SerpApiHotelProvider.fetch_tier_prices", return_value=tier_data)
-        mocker.patch("trips.services.LocalCostProvider.fetch_daily_tier_costs", return_value=local_data)
+        mocker.patch(
+            "trips.services.NuiteeFlightProvider.search_options",
+            return_value={"origin": "NYC", "destination": "PAR", "currency": "USD", "tiers": {
+                "cheapest": [{"price": 200}], "affordable": [{"price": 400}],
+                "moderate": [{"price": 700}], "luxury": [{"price": 1200}]}},
+        )
+        mocker.patch(
+            "trips.services.NuiteeHotelProvider.search_options",
+            return_value={"destination_city": "Paris", "destination_country": "France",
+                          "currency": "USD", "nights": 7, "tiers": {
+                "cheapest": [{"price": 420}], "affordable": [{"price": 700}],
+                "moderate": [{"price": 1260}], "luxury": [{"price": 2450}]}},
+        )
 
     def test_valid_payload_returns_200(self, api_client, mocker):
         self._mock_providers(mocker)

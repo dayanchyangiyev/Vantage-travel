@@ -6,15 +6,57 @@
 
 ---
 
+## 0. Current Situation (Latest) — READ THIS
+
+The pricing/search stack was migrated off **SerpAPI** onto **LiteAPI (a.k.a.
+Nuitee Connect / `connect.nuitee`)** for both flights and hotels, and a
+flight/hotel **search + selection** feature was added.
+
+**What changed most recently:**
+1. **Flight & hotel search (LiteAPI).** Users can search individual, selectable
+   flight and hotel options on the dashboard, grouped into the 4 tiers
+   (`cheapest/affordable/moderate/luxury`), 2–3 options per tier, plus a dedicated
+   full-screen search tab for each. The chosen flight/hotel is **saved on the Trip**
+   (selection only — **no booking or payment**).
+2. **SerpAPI removed.** `SerpApiClient`, `SerpApiFlightProvider`,
+   `SerpApiHotelProvider` and all `SERPAPI_*` settings/env are gone. The 4-tier
+   budget (`build_dynamic_tier_quotes`) is now derived from the **LiteAPI flight +
+   hotel search prices**.
+3. **`LocalCostProvider` (Google Places food costs) removed.** Daily "living" cost
+   is now **derived from the fetched nightly lodging price** per tier
+   (`_living_daily_cost`, with per-tier factor/floor/cap). Google Places is still
+   used, but **only for weather geocoding** (`GoogleWeatherProvider`).
+4. **Dashboard "Transit Protocols" section removed** (the Gemini `plan.tickets`
+   block). `TripPlan.tickets` still exists in the type but is no longer rendered.
+
+**Key external-API facts (verified against the LiteAPI sandbox):**
+- Base `https://api.liteapi.travel/v3.0`, auth header `X-API-Key`, sandbox key
+  prefix `sand_`. Env vars: `NUITEE_API_KEY`, `NUITEE_PUBLIC_KEY`, `NUITEE_BASE_URL`.
+- Hotels: `POST /hotels/rates` with `aiSearch:"City, Country"` (avoids needing
+  ISO-2 codes); hotel names/stars/photo from `GET /data/hotels?hotelIds=<csv>`.
+- Flights: `POST /flights/rates` with `legs[]`; resolve city→IATA via
+  `GET /data/flights/airports?q=<city>` (prefer the metro "All Airports" code —
+  a single airport can return far fewer routes).
+- **Latency note:** LiteAPI sandbox flight/hotel calls take ~4–6s each (supplier
+  aggregation). `build_dynamic_tier_quotes` runs the two searches concurrently
+  (`ThreadPoolExecutor`) so the budget loads in ~5–6s, in parallel with Gemini/weather.
+
+**Test counts:** 137 backend (`pytest`) + 30 frontend (`vitest`).
+
+The sections below are the stable architecture/rules. Where an older section still
+says "SerpAPI" or "Google Places for local costs," **this section 0 overrides it.**
+
+---
+
 ## 1. What This Project Is
 
 **Vantage Travel** is a full-stack travel planning web application. A user types in a destination, travel dates, and number of travelers. The app:
 
-1. Queries **SerpAPI** (Google Flights) for real flight prices across four budget tiers
-2. Queries **SerpAPI** (Google Hotels) for real hotel prices across four budget tiers
-3. Queries **Google Places** for local daily living costs (food, activities) across four budget tiers
+1. Queries **LiteAPI (Nuitee)** for real, selectable **flight options** across the four budget tiers
+2. Queries **LiteAPI (Nuitee)** for real, selectable **hotel options** across the four budget tiers
+3. Derives a 4-tier **trip budget** from those LiteAPI flight + hotel prices (daily living cost is inferred from lodging price)
 4. Sends the inputs to **Google Gemini AI** to generate a full written trip plan (itinerary, tips, packing list)
-5. Lets the user save the trip and revisit it later
+5. Lets the user **choose and save a specific flight + hotel**, plus save the trip and revisit it later
 6. Provides a **budget evaluation** tool: user inputs their max budget, app tells them if it's feasible and suggests adjustments
 
 The four pricing tiers used throughout are always: `cheapest`, `affordable`, `moderate`, `luxury`.
@@ -49,10 +91,14 @@ The four pricing tiers used throughout are always: `cheapest`, `affordable`, `mo
 ### External APIs
 | API | Purpose | Key env var |
 |---|---|---|
-| SerpAPI | Flight + hotel prices | `SERPAPI_API_KEY` |
-| Google Places | Local daily living costs | `GOOGLE_PLACES_API_KEY` |
+| LiteAPI (Nuitee Connect) | Flight + hotel search/options + 4-tier budget basis | `NUITEE_API_KEY` (`NUITEE_PUBLIC_KEY`, `NUITEE_BASE_URL`) |
+| Google Places | Weather geocoding only (city → lat/lng) | `GOOGLE_PLACES_API_KEY` |
+| Google Weather | Destination weather summary | `GOOGLE_WEATHER_API_KEY` |
 | GeoNames | City autocomplete in the form | `GEONAMES_USERNAME` |
 | Google Gemini | AI trip plan generation | Handled in `src/lib/gemini.ts` |
+
+> **Removed:** SerpAPI (flights/hotels) and Google Places "local daily living
+> costs" are no longer used. Living cost is derived from LiteAPI lodging prices.
 
 ---
 
@@ -89,11 +135,13 @@ Vantage-travel/
 │   │   ├── Login.tsx               ← Login form
 │   │   ├── Register.tsx            ← Registration form
 │   │   ├── TripForm.tsx            ← Trip input form (destination, dates, interests)
-│   │   ├── Dashboard.tsx           ← Trip results display
+│   │   ├── Dashboard.tsx           ← Trip results + "Flights & Stays" search/selection section
+│   │   ├── BookingSearch.tsx       ← Reusable flight/hotel search UI (embedded + full variants)
 │   │   └── GeoAutocomplete.tsx     ← City autocomplete input (calls GeoNames)
 │   ├── lib/
 │   │   ├── trips.ts                ← Façade: fetch/save trip via backend API
-│   │   ├── dynamicPricing.ts       ← Façade: fetch pricing tiers via backend API
+│   │   ├── dynamicPricing.ts       ← Façade: fetch 4-tier budget via backend API
+│   │   ├── search.ts               ← Façade: flight/hotel search + saveSelection (PATCH)
 │   │   ├── gemini.ts               ← Façade: generate trip plan via Gemini
 │   │   └── geonames.ts             ← Façade: city search via GeoNames
 │   └── types/
@@ -105,12 +153,13 @@ Vantage-travel/
 │   │   ├── test_models.py
 │   │   ├── test_serializers.py
 │   │   ├── test_services_helpers.py
-│   │   ├── test_services_flights.py
-│   │   ├── test_services_hotels.py
-│   │   ├── test_services_local_costs.py
-│   │   ├── test_services_orchestration.py
+│   │   ├── test_services_nuitee.py        ← LiteAPI flight/hotel providers + bucketing
+│   │   ├── test_services_orchestration.py ← build_dynamic_tier_quotes + evaluate_dynamic_budget
+│   │   ├── test_services_weather.py
 │   │   ├── test_views_trips.py
+│   │   ├── test_views_search.py           ← flight/hotel search + trip selection PATCH
 │   │   └── test_views_accounts.py
+│   │   (removed: test_services_flights.py, test_services_hotels.py, test_services_local_costs.py)
 │   └── frontend/
 │       ├── setup.ts                ← jest-dom + localStorage mock + cleanup
 │       ├── test_utils.tsx          ← renderWithAuth helper
@@ -155,10 +204,14 @@ All routes are prefixed with `http://127.0.0.1:8000/api/`
 |---|---|---|---|
 | GET | `trips/` | Bearer JWT | List user's trips |
 | POST | `trips/` | Bearer JWT | Create/save a trip |
+| GET/PATCH | `trips/<id>/` | Bearer JWT | Retrieve/update a trip — used to PATCH `selected_flight`/`selected_hotel` |
 | GET | `trips/current/` | Bearer JWT | Get most recent saved trip |
 | GET | `trips/geonames/` | None | City autocomplete proxy |
-| GET | `trips/budget/tiers/` | None | Get 4-tier pricing breakdown |
+| GET | `trips/flights/search/` | None | LiteAPI flight options grouped into 4 tiers |
+| GET | `trips/hotels/search/` | None | LiteAPI hotel options grouped into 4 tiers |
+| GET | `trips/budget/tiers/` | None | 4-tier pricing breakdown (LiteAPI-derived) |
 | POST | `trips/budget/evaluate/` | None | Check if budget is feasible |
+| GET | `trips/weather/` | None | Destination weather summary |
 
 ---
 
@@ -177,7 +230,10 @@ Trip
 ├── interests       JSONField — list of strings e.g. ["Food", "Art"]
 ├── engine_output   JSONField — Gemini-generated trip plan (stored as dict)
 ├── pricing_snapshot JSONField — full 4-tier pricing result
-└── created_at      DateTimeField(auto_now_add=True)
+├── selected_flight JSONField (null) — chosen LiteAPI flight option (migration 0004)
+├── selected_hotel  JSONField (null) — chosen LiteAPI hotel option (migration 0004)
+├── created_at      DateTimeField(auto_now_add=True)
+└── updated_at      DateTimeField(auto_now=True)
 
 Ordering: -created_at (newest first)
 ```
@@ -208,15 +264,17 @@ On mount, `App.tsx` checks if the user is authenticated and tries to load their 
 
 ### Key classes and functions:
 
-**`SerpApiClient`** — wraps all HTTP calls to SerpAPI. Handles: URL building, API key injection, request execution, response parsing, error handling, and calling `log_api_response()`.
+**`LiteApiClient`** — wraps all HTTP calls to LiteAPI (Nuitee). Handles URL building, `X-API-Key` header injection, and routes every call through `_http_request_json()` (so logging/redaction is automatic). `post(path, payload)` / `get(path, params)`.
 
-**`SerpApiFlightProvider`** — uses `SerpApiClient` to fetch flight prices, parse the response structure, extract all numeric price candidates, and call `_map_values_to_tiers()`.
+**`NuiteeFlightProvider`** — resolves city→IATA (`/data/flights/airports?q=`), calls `POST /flights/rates` with round-trip `legs[]`, maps journeys → `FlightOption`s (airline, price, stops, duration, times), dedupes, and buckets into 4 tiers via `_bucket_options_by_price()`. `search_options(FlightSearchInput) → CategorizedFlightResult`.
 
-**`SerpApiHotelProvider`** — same pattern as flights but for hotels. Parses `rate_per_night`, `extracted_price`, and `ads` sections.
+**`NuiteeHotelProvider`** — calls `POST /hotels/rates` with `aiSearch:"City, Country"`, joins names/stars/photo from `GET /data/hotels?hotelIds=`, maps each hotel's cheapest offer → `HotelOption`, buckets into 4 tiers. `search_options(HotelSearchInput) → CategorizedHotelResult`.
 
-**`LocalCostProvider`** — calls Google Places Text Search API to find restaurants/activities. Uses `priceLevel`, `priceRange`, and `rating` to estimate daily living costs per tier.
+**`search_flight_options()` / `search_hotel_options()`** — thin service entry points the views call (guard `adults > 0`, delegate to the providers).
 
-**`build_dynamic_tier_quotes(input: DynamicPricingInput) → DynamicTierQuoteResult`** — the main orchestrator. Calls all three providers, assembles the result, calculates total trip cost per tier.
+**`build_dynamic_tier_quotes(input: DynamicPricingInput) → DynamicTierQuoteResult`** — the 4-tier budget orchestrator. Runs `NuiteeFlightProvider` + `NuiteeHotelProvider` **concurrently** (`ThreadPoolExecutor`), takes a representative (cheapest) price per tier (`_representative_tier_prices`, with neighbour-fill), converts hotel stay-totals to nightly, derives daily living via `_living_daily_cost()`, and assembles per-tier totals. Signature/output shape unchanged from the SerpAPI era.
+
+**`GoogleWeatherProvider`** — unchanged; geocodes via Google Places, fetches Google Weather forecast.
 
 **`evaluate_dynamic_budget(input: BudgetEvaluationInput) → BudgetEvaluationResult`** — calls `build_dynamic_tier_quotes` then checks if the user's stated budget covers their preferred tier. Returns feasibility + suggestions.
 
@@ -244,9 +302,9 @@ These 8 patterns are the established architecture. **All future changes must fol
 - **Rule**: Never add business logic to `views.py`. Never call external APIs from `views.py`. If a new calculation is needed, add a function to `services.py` and call it from the view.
 
 ### Pattern 3: Provider / Strategy
-- Each external pricing source is its own class with a consistent interface.
-- Current providers: `SerpApiFlightProvider`, `SerpApiHotelProvider`, `LocalCostProvider`
-- **Rule**: If adding a new data source (e.g., car rentals), create a new `XxxProvider` class with a `fetch_tier_prices()` method that returns `{"cheapest": Decimal, "affordable": Decimal, "moderate": Decimal, "luxury": Decimal}`. Wire it into `build_dynamic_tier_quotes()`.
+- Each external source is its own class with a consistent interface.
+- Current providers: `NuiteeFlightProvider`, `NuiteeHotelProvider` (both expose `search_options(...)`), and `GoogleWeatherProvider`. All HTTP goes through `LiteApiClient`/`_http_request_json`.
+- **Rule**: If adding a new data source, create a new `XxxProvider` class that returns options/prices grouped by the 4 tiers (reuse `_bucket_options_by_price()`), and wire it into `build_dynamic_tier_quotes()` if it affects the budget.
 
 ### Pattern 4: Façade
 - **Backend**: `SerpApiClient` hides raw HTTP. `build_dynamic_tier_quotes()` hides multi-provider orchestration.
@@ -267,7 +325,7 @@ These 8 patterns are the established architecture. **All future changes must fol
 - **Rule**: Never pass `token` or `user` as props down a component tree. Always use `useAuth()`. If new global state is needed (e.g., user preferences), create a new context file following `AuthContext.tsx` as the template.
 
 ### Pattern 8: State Machine (React)
-- `App.tsx` uses `type Step = "landing" | "login" | "register" | "form" | "loading" | "dashboard"`.
+- `App.tsx` uses `type Step = "landing" | "login" | "register" | "form" | "dashboard" | "flight-search" | "hotel-search"`. The `flight-search`/`hotel-search` steps render a full-screen `<BookingSearch variant="full" />`. Selecting an option updates App state and (when authenticated) PATCHes the trip via `saveSelection`.
 - **Rule**: If a new screen is added, add its name to the `Step` union type and add a corresponding conditional render block in `App.tsx`. Never show two screens simultaneously. Never use boolean flags (`isLoginOpen`, `isDashboardOpen`) — use the `step` state.
 
 ---
@@ -357,17 +415,25 @@ DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
 CORS_ALLOWED_ORIGINS=http://localhost:5173
 GEONAMES_USERNAME=<your-geonames-username>
 GOOGLE_MAPS_API_KEY=<key>
-SERPAPI_BASE_URL=https://serpapi.com/search.json
-SERPAPI_API_KEY=<your-serpapi-key>
+# LiteAPI / Nuitee Connect (flight + hotel search; sandbox key prefix sand_)
+NUITEE_BASE_URL=https://api.liteapi.travel/v3.0
+NUITEE_API_KEY=<your-liteapi-key>
+NUITEE_PUBLIC_KEY=<your-liteapi-public-key>
+# Google Places — used for weather geocoding only
 GOOGLE_PLACES_TEXT_SEARCH_URL=https://places.googleapis.com/v1/places:searchText
 GOOGLE_PLACES_API_KEY=<your-places-key>
+# Google Weather
+GOOGLE_WEATHER_BASE_URL=https://weather.googleapis.com/v1/forecast/days:lookup
+GOOGLE_WEATHER_API_KEY=<your-weather-key>
 ```
+
+> SerpAPI env vars (`SERPAPI_*`) have been removed.
 
 ---
 
 ## 12. Testing
 
-### Run backend tests (164 total — 142 backend, 22 frontend)
+### Run backend tests (167 total — 137 backend, 30 frontend)
 ```bash
 source venv/bin/activate
 cd backend && python -m pytest unit_tests/ -v

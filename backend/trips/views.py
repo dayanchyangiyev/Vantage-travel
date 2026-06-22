@@ -15,6 +15,7 @@ from .serializers import (
     BudgetEvaluationInputSerializer,
     BudgetTierQuerySerializer,
     FlightSearchQuerySerializer,
+    HotelBookingSerializer,
     HotelSearchQuerySerializer,
     TripSerializer,
     WeatherQuerySerializer,
@@ -22,8 +23,10 @@ from .serializers import (
 from .services import (
     DynamicPricingInput,
     FlightSearchInput,
+    HotelBookingInput,
     HotelSearchInput,
     build_dynamic_tier_quotes,
+    create_hotel_booking,
     evaluate_dynamic_budget,
     fetch_destination_weather,
     search_flight_options,
@@ -241,6 +244,30 @@ def hotel_search(request):
     except ValueError as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     return Response(result, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def hotel_booking(request):
+    serializer = HotelBookingSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    payload = serializer.validated_data
+    booking_input = HotelBookingInput(
+        offer_id=payload["offer_id"],
+        first_name=payload["first_name"],
+        last_name=payload["last_name"],
+        email=payload["email"],
+    )
+    try:
+        result = create_hotel_booking(booking_input)
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception:
+        return Response(
+            {"detail": "Booking service is temporarily unavailable."},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+    return Response(result, status=status.HTTP_201_CREATED)
 
 
 class TripListCreateView(generics.ListCreateAPIView):

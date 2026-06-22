@@ -96,20 +96,6 @@ function TripPlanSkeleton() {
           </div>
         </div>
       </div>
-      {/* Places */}
-      <div className="space-y-8 pt-20 border-t border-zinc-50">
-        <Skeleton className="h-2 w-36" />
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="space-y-3">
-            <div className="flex items-baseline gap-6">
-              <Skeleton className="h-3 w-6" />
-              <Skeleton className="h-6 w-48" />
-            </div>
-            <Skeleton className="h-2 w-full ml-12" />
-            <Skeleton className="h-2 w-4/5 ml-12" />
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
@@ -569,24 +555,6 @@ export default function Dashboard({
                   <p className="text-sm font-light leading-relaxed text-zinc-500 max-w-sm">
                     {plan.bestTimeToTravel.reason}
                   </p>
-                </div>
-              </div>
-
-              <div className="space-y-8">
-                <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-300">Curated Interest Points</label>
-                <div className="space-y-12">
-                  {plan.places.map((place, idx) => (
-                    <div key={idx} className="group cursor-default">
-                      <div className="flex items-baseline gap-6 mb-4">
-                        <span className="text-xs font-bold text-zinc-300">0{idx + 1}</span>
-                        <h4 className="text-2xl font-light tracking-tight group-hover:pl-4 transition-all duration-500">{place.name}</h4>
-                        <span className="text-[10px] uppercase tracking-widest text-zinc-200 font-bold">{place.type}</span>
-                      </div>
-                      <p className="text-sm font-light text-zinc-500 max-w-xl pl-12 leading-relaxed">
-                        {place.description}
-                      </p>
-                    </div>
-                  ))}
                 </div>
               </div>
             </motion.div>

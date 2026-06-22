@@ -2,10 +2,11 @@ import { useId, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft, Plane, BedDouble, CreditCard, Check, Lock, ShieldCheck,
-  Loader2, User, CalendarCheck,
+  Loader2, User, CalendarCheck, AlertTriangle,
 } from 'lucide-react';
 import { FlightOption, HotelOption } from '../types/trip';
 import { BookingTripContext } from './BookingSearch';
+import { bookHotel } from '../lib/search';
 
 // ---------------------------------------------------------------------------
 // This is a MOCK checkout — no real charge is ever made. It collects realistic
@@ -182,6 +183,10 @@ export default function Checkout({
 }: CheckoutProps) {
   const [stage, setStage] = useState<Stage>('details');
   const [bookingRef, setBookingRef] = useState<string>('');
+  const [bookingStatus, setBookingStatus] = useState<string>('CONFIRMED');
+  const [hotelConfCode, setHotelConfCode] = useState<string>('');
+  const [isRealBooking, setIsRealBooking] = useState<boolean>(false);
+  const [bookingError, setBookingError] = useState<string | null>(null);
 
   // Traveler details
   const [title, setTitle] = useState('');
@@ -259,15 +264,45 @@ export default function Checkout({
     }
   }
 
-  function pay() {
+  async function pay() {
     if (!validatePayment()) return;
+    setBookingError(null);
     setStage('processing');
-    // Simulate gateway latency, then issue a confirmation.
-    window.setTimeout(() => {
-      setBookingRef(makeBookingRef());
+    try {
+      if (selectedHotel) {
+        // Real LiteAPI sandbox booking (prebook → book). Appears in Nuitee Connect.
+        const conf = await bookHotel({
+          offerId: selectedHotel.id,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          email: email.trim(),
+        });
+        setBookingRef(conf.booking_id);
+        setBookingStatus(conf.status || 'CONFIRMED');
+        setHotelConfCode(conf.hotel_confirmation_code || '');
+        setIsRealBooking(true);
+      } else {
+        // Flight-only: flight offers expire within minutes, so this stays a local
+        // demo confirmation rather than a live supplier booking.
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 1400));
+        setBookingRef(makeBookingRef());
+        setIsRealBooking(false);
+      }
       setStage('confirmed');
+      scrollTop();
+    } catch (e) {
+      setBookingError(e instanceof Error ? e.message : 'Booking could not be completed.');
+      setStage('payment');
+      scrollTop();
+    }
+  }
+
+  function scrollTop() {
+    try {
       window.scrollTo({ top: 0, behavior: 'smooth' });
-    }, 2200);
+    } catch {
+      // jsdom / unsupported environments — non-fatal.
+    }
   }
 
   const money = (n: number) => `$${n.toFixed(2)}`;
@@ -381,13 +416,25 @@ export default function Checkout({
                 <span className="text-lg font-medium tracking-widest tabular-nums">{bookingRef}</span>
               </div>
               <div className="px-5 py-4 space-y-2 text-sm">
+                <div className="flex justify-between"><span className="text-zinc-400">Status</span><span className="font-semibold text-emerald-600">{bookingStatus}</span></div>
                 <div className="flex justify-between"><span className="text-zinc-400">Lead traveler</span><span>{title} {firstName} {lastName}</span></div>
                 <div className="flex justify-between"><span className="text-zinc-400">Trip</span><span>{trip.destinationCity}, {trip.destinationCountry}</span></div>
                 <div className="flex justify-between"><span className="text-zinc-400">Dates</span><span>{trip.startDate} → {trip.endDate}</span></div>
                 {selectedFlight && <div className="flex justify-between"><span className="text-zinc-400">Flight</span><span>{selectedFlight.airline}</span></div>}
                 {selectedHotel && <div className="flex justify-between"><span className="text-zinc-400">Hotel</span><span className="truncate ml-4">{selectedHotel.name}</span></div>}
+                {isRealBooking && hotelConfCode && (
+                  <div className="flex justify-between"><span className="text-zinc-400">Hotel confirmation</span><span className="tabular-nums">{hotelConfCode}</span></div>
+                )}
                 <div className="flex justify-between"><span className="text-zinc-400">Paid · {currency}</span><span className="font-semibold">{money(grandTotal)}</span></div>
                 <div className="flex justify-between"><span className="text-zinc-400">Card</span><span>{brand ? brand.toUpperCase() : 'CARD'} •••• {maskedCard}</span></div>
+              </div>
+              <div className="border-t border-zinc-100 px-5 py-3 flex items-center gap-2">
+                <ShieldCheck className={`w-3.5 h-3.5 ${isRealBooking ? 'text-emerald-600' : 'text-zinc-400'}`} />
+                <span className="text-[10px] text-zinc-400">
+                  {isRealBooking
+                    ? 'Confirmed with the supplier via Nuitee Connect (sandbox — no real charge).'
+                    : 'Demo reference — flight offers expire too quickly to hold a live booking.'}
+                </span>
               </div>
             </div>
             <button
@@ -459,6 +506,16 @@ export default function Checkout({
                     <CreditCard className="w-4 h-4 text-zinc-500" strokeWidth={1.5} />
                     <h3 className="text-sm uppercase tracking-[0.2em] font-semibold text-zinc-700">Payment Details</h3>
                   </div>
+
+                  {bookingError && (
+                    <div className="border border-red-100 bg-red-50 p-4 flex items-start gap-3">
+                      <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-xs text-red-500 font-medium uppercase tracking-widest mb-1">Booking failed</p>
+                        <p className="text-xs text-red-400 font-light">{bookingError}</p>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="relative">
                     <TextField

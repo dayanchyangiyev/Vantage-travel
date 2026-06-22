@@ -28,13 +28,20 @@ flight/hotel **search + selection** feature was added.
    used, but **only for weather geocoding** (`GoogleWeatherProvider`).
 4. **Dashboard "Transit Protocols" section removed** (the Gemini `plan.tickets`
    block). `TripPlan.tickets` still exists in the type but is no longer rendered.
-5. **Mock checkout/booking flow added** (`components/Checkout.tsx`, step
-   `"checkout"`). A "Book & Pay" button on the dashboard (enabled once a flight
-   and/or hotel is selected) opens a multi-step wizard: traveler details →
-   payment → confirmation, with client-side validation (Luhn card check, card-brand
-   detection, expiry/age checks), a simulated processing delay, and a generated
-   booking reference. **Entirely a front-end mock — no real charge, no backend
-   endpoint, nothing persisted.** For the university demo.
+5. **Checkout/booking flow added** (`components/Checkout.tsx`, step `"checkout"`).
+   A "Book & Pay" button on the dashboard (enabled once a flight and/or hotel is
+   selected) opens a multi-step wizard: traveler details → payment → confirmation,
+   with client-side validation (Luhn card check, card-brand detection, expiry/age
+   checks). The card form is a **mock** (no card is charged), but on "Pay" the
+   selected **hotel is booked for real against the LiteAPI sandbox** via
+   `POST /api/trips/bookings/` → `NuiteeBookingProvider.book_hotel` (prebook →
+   book with `payment.method = "WALLET"`, sandbox credit). The confirmation shows
+   the genuine LiteAPI `bookingId` + status + hotel confirmation code, and the
+   booking appears in the Nuitee Connect dashboard. Flights stay a local demo
+   reference (LiteAPI flight offers expire within minutes, too fast to hold).
+   Nothing is persisted to the `Trip`.
+6. **Dashboard "Curated Interest Points" (places) widget removed** — it showed
+   Gemini `plan.places`. `TripPlan.places` still exists in the type, unused.
 
 **Key external-API facts (verified against the LiteAPI sandbox):**
 - Base `https://api.liteapi.travel/v3.0`, auth header `X-API-Key`, sandbox key
@@ -48,7 +55,7 @@ flight/hotel **search + selection** feature was added.
   aggregation). `build_dynamic_tier_quotes` runs the two searches concurrently
   (`ThreadPoolExecutor`) so the budget loads in ~5–6s, in parallel with Gemini/weather.
 
-**Test counts:** 137 backend (`pytest`) + 33 frontend (`vitest`).
+**Test counts:** 142 backend (`pytest`) + 33 frontend (`vitest`).
 
 The sections below are the stable architecture/rules. Where an older section still
 says "SerpAPI" or "Google Places for local costs," **this section 0 overrides it.**
@@ -217,6 +224,7 @@ All routes are prefixed with `http://127.0.0.1:8000/api/`
 | GET | `trips/geonames/` | None | City autocomplete proxy |
 | GET | `trips/flights/search/` | None | LiteAPI flight options grouped into 4 tiers |
 | GET | `trips/hotels/search/` | None | LiteAPI hotel options grouped into 4 tiers |
+| POST | `trips/bookings/` | None | Real LiteAPI sandbox hotel booking (prebook → book) |
 | GET | `trips/budget/tiers/` | None | 4-tier pricing breakdown (LiteAPI-derived) |
 | POST | `trips/budget/evaluate/` | None | Check if budget is feasible |
 | GET | `trips/weather/` | None | Destination weather summary |

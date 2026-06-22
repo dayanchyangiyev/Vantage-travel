@@ -79,6 +79,65 @@ class TestHotelSearchView:
         assert resp.status_code == 400
 
 
+class TestHotelBookingView:
+    def test_books_and_returns_confirmation(self, api_client, mocker):
+        mocker.patch(
+            "trips.views.create_hotel_booking",
+            return_value={
+                "booking_id": "PyPdNLMVq", "supplier_booking_id": "PyPdNLMVq",
+                "status": "CONFIRMED", "hotel_confirmation_code": "test",
+                "price": 805.1, "currency": "USD",
+            },
+        )
+        resp = api_client.post(reverse("hotel-booking"), {
+            "offer_id": "abc", "first_name": "John", "last_name": "Traveler",
+            "email": "john@example.com",
+        }, format="json")
+        assert resp.status_code == 201
+        assert resp.data["status"] == "CONFIRMED"
+        assert resp.data["booking_id"] == "PyPdNLMVq"
+
+    def test_missing_field_is_400(self, api_client):
+        resp = api_client.post(reverse("hotel-booking"), {"offer_id": "abc"}, format="json")
+        assert resp.status_code == 400
+
+    def test_expired_offer_is_400(self, api_client, mocker):
+        mocker.patch(
+            "trips.views.create_hotel_booking",
+            side_effect=ValueError("This rate is no longer available to book"),
+        )
+        resp = api_client.post(reverse("hotel-booking"), {
+            "offer_id": "stale", "first_name": "A", "last_name": "B", "email": "a@b.com",
+        }, format="json")
+        assert resp.status_code == 400
+        assert "no longer available" in resp.data["detail"]
+
+
+class TestNuiteeBookingProvider:
+    def test_prebook_then_book_flow(self, mocker):
+        from trips.services import NuiteeBookingProvider, HotelBookingInput
+        provider = NuiteeBookingProvider()
+        post = mocker.patch.object(provider.client, "post", side_effect=[
+            {"data": {"prebookId": "pb1", "price": 805.1, "currency": "USD"}},
+            {"data": {"bookingId": "bk1", "supplierBookingId": "bk1",
+                      "status": "CONFIRMED", "hotelConfirmationCode": "test"}},
+        ])
+        result = provider.book_hotel(HotelBookingInput("offer1", "John", "Doe", "j@d.com"))
+        assert result["booking_id"] == "bk1"
+        assert result["status"] == "CONFIRMED"
+        assert result["price"] == 805.1
+        # prebook called first, then book
+        assert post.call_args_list[0].args[0] == "rates/prebook"
+        assert post.call_args_list[1].args[0] == "rates/book"
+
+    def test_raises_when_prebook_has_no_id(self, mocker):
+        from trips.services import NuiteeBookingProvider, HotelBookingInput
+        provider = NuiteeBookingProvider()
+        mocker.patch.object(provider.client, "post", return_value={"data": {}})
+        with pytest.raises(ValueError, match="no longer available"):
+            provider.book_hotel(HotelBookingInput("offer1", "John", "Doe", "j@d.com"))
+
+
 class TestTripSelectionPatch:
     def _make_trip(self, user):
         from trips.models import Trip

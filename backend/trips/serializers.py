@@ -109,3 +109,10 @@ class HotelSearchQuerySerializer(serializers.Serializer):
     check_out = serializers.DateField()
     adults = serializers.IntegerField(min_value=1, default=1)
     currency = serializers.CharField(required=False, default="USD")
+
+
+class HotelBookingSerializer(serializers.Serializer):
+    offer_id = serializers.CharField()
+    first_name = serializers.CharField(max_length=80)
+    last_name = serializers.CharField(max_length=80)
+    email = serializers.EmailField()

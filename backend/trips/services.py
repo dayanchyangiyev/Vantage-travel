@@ -1068,3 +1068,93 @@ def search_hotel_options(input_data: HotelSearchInput) -> CategorizedHotelResult
     if input_data.adults <= 0:
         raise ValueError("adults must be greater than zero.")
     return NuiteeHotelProvider().search_options(input_data)
+
+
+# ---------------------------------------------------------------------------
+# Booking — real LiteAPI (Nuitee) sandbox hotel booking
+#
+# The checkout "Pay" action calls this. It performs the real two-step LiteAPI
+# flow (prebook → book) against the sandbox using the WALLET payment method
+# (sandbox credit), producing a genuine booking that appears in the Nuitee
+# Connect dashboard. No real money moves — the sandbox key is test-only.
+# ---------------------------------------------------------------------------
+
+
+class BookingConfirmation(TypedDict):
+    booking_id: str
+    supplier_booking_id: str | None
+    status: str
+    hotel_confirmation_code: str | None
+    price: float | None
+    currency: str | None
+
+
+@dataclass(frozen=True)
+class HotelBookingInput:
+    offer_id: str
+    first_name: str
+    last_name: str
+    email: str
+
+
+class NuiteeBookingProvider:
+    def __init__(self):
+        self.client = LiteApiClient()
+
+    def book_hotel(self, input_data: HotelBookingInput) -> BookingConfirmation:
+        prebook = self.client.post(
+            "rates/prebook",
+            {"offerId": input_data.offer_id, "usePaymentSdk": False},
+        )
+        prebook_data = prebook.get("data") or {}
+        prebook_id = prebook_data.get("prebookId")
+        if not prebook_id:
+            raise ValueError(
+                "This rate is no longer available to book — please re-run the "
+                "search and select the hotel again."
+            )
+
+        holder = {
+            "firstName": input_data.first_name,
+            "lastName": input_data.last_name,
+            "email": input_data.email,
+        }
+        booking = self.client.post(
+            "rates/book",
+            {
+                "prebookId": prebook_id,
+                "holder": holder,
+                "guests": [
+                    {
+                        "occupancyNumber": 1,
+                        "firstName": input_data.first_name,
+                        "lastName": input_data.last_name,
+                        "email": input_data.email,
+                        "remarks": "",
+                    }
+                ],
+                # Sandbox payment via test wallet credit — no card is charged.
+                "payment": {"method": "WALLET"},
+            },
+        )
+        data = booking.get("data") or {}
+        booking_id = data.get("bookingId")
+        if not booking_id:
+            raise ValueError("The supplier did not confirm this booking.")
+
+        return {
+            "booking_id": booking_id,
+            "supplier_booking_id": data.get("supplierBookingId"),
+            "status": data.get("status") or "CONFIRMED",
+            "hotel_confirmation_code": data.get("hotelConfirmationCode"),
+            "price": float(_safe_decimal(prebook_data.get("price")) or 0)
+            if prebook_data.get("price") is not None
+            else None,
+            "currency": prebook_data.get("currency"),
+        }
+
+
+def create_hotel_booking(input_data: HotelBookingInput) -> BookingConfirmation:
+    if not input_data.offer_id:
+        raise ValueError("A hotel offer is required to book.")
+    return NuiteeBookingProvider().book_hotel(input_data)

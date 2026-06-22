@@ -75,6 +75,50 @@ export async function searchHotels(
   );
 }
 
+export interface HotelBookingParams {
+  offerId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+}
+
+export interface BookingConfirmation {
+  booking_id: string;
+  supplier_booking_id: string | null;
+  status: string;
+  hotel_confirmation_code: string | null;
+  price: number | null;
+  currency: string | null;
+}
+
+/**
+ * Create a REAL booking against the LiteAPI (Nuitee) sandbox. The sandbox key is
+ * test-only — no money is charged — but the booking appears in Nuitee Connect.
+ */
+export async function bookHotel(params: HotelBookingParams): Promise<BookingConfirmation> {
+  const response = await fetch(`${API_BASE}/trips/bookings/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      offer_id: params.offerId,
+      first_name: params.firstName,
+      last_name: params.lastName,
+      email: params.email,
+    }),
+  });
+  if (!response.ok) {
+    let detail = "Booking could not be completed.";
+    try {
+      const data = await response.json();
+      detail = data?.detail || detail;
+    } catch {
+      // keep default detail
+    }
+    throw new Error(detail);
+  }
+  return response.json();
+}
+
 /**
  * Persist the chosen flight and/or hotel onto a saved trip.
  * Only meaningful for authenticated users with a saved trip id.

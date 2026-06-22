@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   ArrowLeft, MoreHorizontal, AlertTriangle, RefreshCw, Sun, Cloud, CloudRain, Droplets,
-  Plane, BedDouble, ChevronRight, Check,
+  Plane, BedDouble, ChevronRight, Check, Lock,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { DynamicTierQuote, FlightOption, HotelOption, SavedTrip, TripPlan, WeatherSummary } from '../types/trip';
@@ -95,20 +95,6 @@ function TripPlanSkeleton() {
             <Skeleton className="h-12 w-32 ml-auto" />
           </div>
         </div>
-      </div>
-      {/* Places */}
-      <div className="space-y-8 pt-20 border-t border-zinc-50">
-        <Skeleton className="h-2 w-36" />
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="space-y-3">
-            <div className="flex items-baseline gap-6">
-              <Skeleton className="h-3 w-6" />
-              <Skeleton className="h-6 w-48" />
-            </div>
-            <Skeleton className="h-2 w-full ml-12" />
-            <Skeleton className="h-2 w-4/5 ml-12" />
-          </div>
-        ))}
       </div>
     </div>
   );
@@ -238,6 +224,7 @@ export default function Dashboard({
   onSelectHotel,
   onOpenFlightSearch,
   onOpenHotelSearch,
+  onOpenCheckout,
   onBack,
   onLogin,
   onRegister,
@@ -259,6 +246,7 @@ export default function Dashboard({
   onSelectHotel: (option: HotelOption) => void;
   onOpenFlightSearch: () => void;
   onOpenHotelSearch: () => void;
+  onOpenCheckout: () => void;
   onBack: () => void;
   onLogin: () => void;
   onRegister: () => void;
@@ -470,6 +458,23 @@ export default function Dashboard({
             </div>
           </div>
 
+          {/* Proceed to booking & payment */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-10 border border-zinc-200 bg-zinc-50/70 px-5 py-4">
+            <div className="text-[11px] text-zinc-500">
+              {selectedFlight || selectedHotel
+                ? <>Ready to book — total <span className="font-semibold text-zinc-900">${((selectedFlight?.price || 0) + (selectedHotel?.price || 0)).toFixed(0)}</span> before taxes.</>
+                : 'Select a flight and/or hotel above to continue to booking.'}
+            </div>
+            <button
+              onClick={onOpenCheckout}
+              disabled={!selectedFlight && !selectedHotel}
+              className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-950 text-white text-[11px] uppercase tracking-[0.25em] font-medium hover:bg-zinc-800 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              Book &amp; Pay
+            </button>
+          </div>
+
           {/* Tabs: separate flight vs hotel search */}
           <div className="flex items-center justify-between border-b border-zinc-100 mb-8">
             <div className="flex">
@@ -550,24 +555,6 @@ export default function Dashboard({
                   <p className="text-sm font-light leading-relaxed text-zinc-500 max-w-sm">
                     {plan.bestTimeToTravel.reason}
                   </p>
-                </div>
-              </div>
-
-              <div className="space-y-8">
-                <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-300">Curated Interest Points</label>
-                <div className="space-y-12">
-                  {plan.places.map((place, idx) => (
-                    <div key={idx} className="group cursor-default">
-                      <div className="flex items-baseline gap-6 mb-4">
-                        <span className="text-xs font-bold text-zinc-300">0{idx + 1}</span>
-                        <h4 className="text-2xl font-light tracking-tight group-hover:pl-4 transition-all duration-500">{place.name}</h4>
-                        <span className="text-[10px] uppercase tracking-widest text-zinc-200 font-bold">{place.type}</span>
-                      </div>
-                      <p className="text-sm font-light text-zinc-500 max-w-xl pl-12 leading-relaxed">
-                        {place.description}
-                      </p>
-                    </div>
-                  ))}
                 </div>
               </div>
             </motion.div>

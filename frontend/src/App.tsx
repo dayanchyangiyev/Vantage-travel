@@ -15,11 +15,12 @@ import { saveSelection } from "./lib/search";
 import TripForm from "./components/TripForm";
 import Dashboard from "./components/Dashboard";
 import BookingSearch, { BookingTripContext } from "./components/BookingSearch";
+import Checkout from "./components/Checkout";
 import Login from "./components/Login";
 import Register from "./components/Register";
 import { useAuth } from "./context/AuthContext";
 
-type Step = "landing" | "login" | "register" | "form" | "dashboard" | "flight-search" | "hotel-search";
+type Step = "landing" | "login" | "register" | "form" | "dashboard" | "flight-search" | "hotel-search" | "checkout";
 
 function splitDestination(destination: string): { city: string; country: string } {
   const parts = (destination || "").split(",").map((p) => p.trim()).filter(Boolean);
@@ -466,6 +467,7 @@ export default function App() {
               onSelectHotel={handleSelectHotel}
               onOpenFlightSearch={() => setStep("flight-search")}
               onOpenHotelSearch={() => setStep("hotel-search")}
+              onOpenCheckout={() => setStep("checkout")}
               onBack={() => setStep(isAuthenticated ? "landing" : "form")}
             />
           </motion.div>
@@ -492,6 +494,18 @@ export default function App() {
               trip={bookingContext}
               selectedHotelId={selectedHotel?.id ?? null}
               onSelectHotel={handleSelectHotel}
+              onBack={() => setStep("dashboard")}
+            />
+          </motion.div>
+        )}
+
+        {step === "checkout" && bookingContext && (
+          <motion.div key="checkout" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <Checkout
+              trip={bookingContext}
+              selectedFlight={selectedFlight}
+              selectedHotel={selectedHotel}
+              customerEmail={user?.email}
               onBack={() => setStep("dashboard")}
             />
           </motion.div>

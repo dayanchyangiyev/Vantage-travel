@@ -9,6 +9,7 @@ from .views import (
     evaluate_budget,
     flight_search,
     geonames_search,
+    hotel_booking,
     hotel_search,
 )
 
@@ -21,5 +22,6 @@ urlpatterns = [
     path("weather/", destination_weather, name="destination-weather"),
     path("flights/search/", flight_search, name="flight-search"),
     path("hotels/search/", hotel_search, name="hotel-search"),
+    path("bookings/", hotel_booking, name="hotel-booking"),
     path("<int:pk>/", TripDetailView.as_view(), name="trip-detail"),
 ]

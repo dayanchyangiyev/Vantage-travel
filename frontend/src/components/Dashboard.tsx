@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   ArrowLeft, MoreHorizontal, AlertTriangle, RefreshCw, Sun, Cloud, CloudRain, Droplets,
-  Plane, BedDouble, ChevronRight, Check,
+  Plane, BedDouble, ChevronRight, Check, Lock,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { DynamicTierQuote, FlightOption, HotelOption, SavedTrip, TripPlan, WeatherSummary } from '../types/trip';
@@ -238,6 +238,7 @@ export default function Dashboard({
   onSelectHotel,
   onOpenFlightSearch,
   onOpenHotelSearch,
+  onOpenCheckout,
   onBack,
   onLogin,
   onRegister,
@@ -259,6 +260,7 @@ export default function Dashboard({
   onSelectHotel: (option: HotelOption) => void;
   onOpenFlightSearch: () => void;
   onOpenHotelSearch: () => void;
+  onOpenCheckout: () => void;
   onBack: () => void;
   onLogin: () => void;
   onRegister: () => void;
@@ -468,6 +470,23 @@ export default function Dashboard({
                 <p className="text-xs text-zinc-400 font-light">No hotel selected yet.</p>
               )}
             </div>
+          </div>
+
+          {/* Proceed to booking & payment */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-10 border border-zinc-200 bg-zinc-50/70 px-5 py-4">
+            <div className="text-[11px] text-zinc-500">
+              {selectedFlight || selectedHotel
+                ? <>Ready to book — total <span className="font-semibold text-zinc-900">${((selectedFlight?.price || 0) + (selectedHotel?.price || 0)).toFixed(0)}</span> before taxes.</>
+                : 'Select a flight and/or hotel above to continue to booking.'}
+            </div>
+            <button
+              onClick={onOpenCheckout}
+              disabled={!selectedFlight && !selectedHotel}
+              className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-950 text-white text-[11px] uppercase tracking-[0.25em] font-medium hover:bg-zinc-800 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              Book &amp; Pay
+            </button>
           </div>
 
           {/* Tabs: separate flight vs hotel search */}

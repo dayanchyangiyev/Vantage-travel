@@ -11,9 +11,9 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import Checkout from '../src/components/Checkout';
 import { BookingTripContext } from '../src/components/BookingSearch';
 
-const bookHotel = vi.fn();
+const createBooking = vi.fn();
 vi.mock('../src/lib/search', () => ({
-  bookHotel: (...args: unknown[]) => bookHotel(...args),
+  createBooking: (...args: unknown[]) => createBooking(...args),
 }));
 
 const trip: BookingTripContext = {
@@ -57,7 +57,7 @@ function fillValidDetails() {
 }
 
 describe('Checkout', () => {
-  beforeEach(() => bookHotel.mockReset());
+  beforeEach(() => createBooking.mockReset());
 
   it('shows the order summary with selected items and a total incl. taxes', () => {
     renderCheckout();
@@ -76,10 +76,17 @@ describe('Checkout', () => {
   });
 
   it('advances to payment, rejects a bad card, then books via the API', async () => {
-    bookHotel.mockResolvedValue({
-      booking_id: 'BK7FqBgJ', supplier_booking_id: 'BK7FqBgJ', status: 'CONFIRMED',
-      hotel_confirmation_code: 'HC123', price: 300, currency: 'USD',
-    });
+    // Hotel books for real; flight is recorded as a demo booking — pay() calls
+    // createBooking once per selected item (hotel first, then flight).
+    createBooking
+      .mockResolvedValueOnce({
+        reference: 'BK7FqBgJ', status: 'CONFIRMED',
+        hotelConfirmationCode: 'HC123', isReal: true, alreadyBooked: false,
+      })
+      .mockResolvedValueOnce({
+        reference: 'VTG-FL12', status: 'CONFIRMED',
+        hotelConfirmationCode: null, isReal: false, alreadyBooked: false,
+      });
     renderCheckout();
     fillValidDetails();
     fireEvent.click(screen.getByText('Continue to Payment'));
@@ -94,15 +101,19 @@ describe('Checkout', () => {
     fill('Billing postal code', '10001');
     fireEvent.click(screen.getByText(/Pay \$/));
     expect(screen.getByText('Enter a valid card number')).toBeInTheDocument();
-    expect(bookHotel).not.toHaveBeenCalled();
+    expect(createBooking).not.toHaveBeenCalled();
 
     // Valid Visa test number → real booking call → confirmation.
     fill('Card number', '4242 4242 4242 4242');
     fireEvent.click(screen.getByText(/Pay \$/));
 
     expect(await screen.findByText('Booking Confirmed', {}, { timeout: 4000 })).toBeInTheDocument();
-    expect(bookHotel).toHaveBeenCalledWith(expect.objectContaining({ offerId: 'h1', email: 'john@example.com' }));
+    expect(createBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'hotel', offerId: 'h1', email: 'john@example.com' }),
+      undefined,
+    );
     expect(screen.getByText('BK7FqBgJ')).toBeInTheDocument();
+    expect(screen.getByText('VTG-FL12')).toBeInTheDocument();
     expect(screen.getByText('HC123')).toBeInTheDocument();
     expect(screen.getByText(/Nuitee Connect/i)).toBeInTheDocument();
   });

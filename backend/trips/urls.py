@@ -1,10 +1,14 @@
 from django.urls import path
 
 from .views import (
+    ChatSessionDetailView,
+    ChatSessionListCreateView,
     CurrentTripView,
     TripDetailView,
     TripListCreateView,
     budget_country_tiers,
+    chat_end_session,
+    chat_send_message,
     destination_weather,
     evaluate_budget,
     flight_search,
@@ -23,5 +27,9 @@ urlpatterns = [
     path("flights/search/", flight_search, name="flight-search"),
     path("hotels/search/", hotel_search, name="hotel-search"),
     path("bookings/", hotel_booking, name="hotel-booking"),
+    path("chat/sessions/", ChatSessionListCreateView.as_view(), name="chat-session-list"),
+    path("chat/sessions/<int:pk>/", ChatSessionDetailView.as_view(), name="chat-session-detail"),
+    path("chat/sessions/<int:pk>/messages/", chat_send_message, name="chat-send-message"),
+    path("chat/sessions/<int:pk>/end/", chat_end_session, name="chat-end-session"),
     path("<int:pk>/", TripDetailView.as_view(), name="trip-detail"),
 ]

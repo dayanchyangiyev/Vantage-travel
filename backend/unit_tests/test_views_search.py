@@ -80,37 +80,83 @@ class TestHotelSearchView:
 
 
 class TestHotelBookingView:
-    def test_books_and_returns_confirmation(self, api_client, mocker):
-        mocker.patch(
-            "trips.views.create_hotel_booking",
-            return_value={
-                "booking_id": "PyPdNLMVq", "supplier_booking_id": "PyPdNLMVq",
-                "status": "CONFIRMED", "hotel_confirmation_code": "test",
-                "price": 805.1, "currency": "USD",
-            },
-        )
+    HOTEL_CONFIRMATION = {
+        "booking_id": "PyPdNLMVq", "supplier_booking_id": "PyPdNLMVq",
+        "status": "CONFIRMED", "hotel_confirmation_code": "test",
+        "price": 805.1, "currency": "USD",
+    }
+
+    def test_requires_authentication(self, api_client):
+        """No anonymous booking — unauthenticated POST is rejected."""
         resp = api_client.post(reverse("hotel-booking"), {
             "offer_id": "abc", "first_name": "John", "last_name": "Traveler",
             "email": "john@example.com",
         }, format="json")
+        assert resp.status_code in (401, 403)
+
+    def test_books_and_persists_for_authenticated_user(self, auth_client, test_user, mocker):
+        mocker.patch("trips.booking.create_hotel_booking", return_value=self.HOTEL_CONFIRMATION)
+        resp = auth_client.post(reverse("hotel-booking"), {
+            "kind": "hotel", "offer_id": "abc", "first_name": "John",
+            "last_name": "Traveler", "email": "john@example.com", "title": "Romoli Hotel",
+        }, format="json")
         assert resp.status_code == 201
         assert resp.data["status"] == "CONFIRMED"
-        assert resp.data["booking_id"] == "PyPdNLMVq"
+        assert resp.data["reference"] == "PyPdNLMVq"
+        assert resp.data["already_booked"] is False
 
-    def test_missing_field_is_400(self, api_client):
-        resp = api_client.post(reverse("hotel-booking"), {"offer_id": "abc"}, format="json")
+        from trips.models import Booking
+        assert Booking.objects.filter(user=test_user, kind="hotel", offer_id="abc").count() == 1
+
+    def test_rebooking_same_offer_is_idempotent(self, auth_client, mocker):
+        booker = mocker.patch("trips.booking.create_hotel_booking", return_value=self.HOTEL_CONFIRMATION)
+        payload = {
+            "kind": "hotel", "offer_id": "abc", "first_name": "John",
+            "last_name": "Traveler", "email": "john@example.com",
+        }
+        first = auth_client.post(reverse("hotel-booking"), payload, format="json")
+        second = auth_client.post(reverse("hotel-booking"), payload, format="json")
+        assert first.data["already_booked"] is False
+        assert second.data["already_booked"] is True
+        assert second.data["reference"] == first.data["reference"]
+        # The supplier is only called once — the second request is short-circuited.
+        assert booker.call_count == 1
+
+    def test_books_flight_as_demo(self, auth_client, mocker):
+        resp = auth_client.post(reverse("hotel-booking"), {
+            "kind": "flight", "offer_id": "fl1", "first_name": "A", "last_name": "B",
+            "email": "a@b.com", "airline": "TAP", "price": "440.00", "currency": "USD",
+        }, format="json")
+        assert resp.status_code == 201
+        assert resp.data["is_real"] is False
+        assert resp.data["reference"].startswith("VTG-")
+
+    def test_missing_field_is_400(self, auth_client):
+        resp = auth_client.post(reverse("hotel-booking"), {"offer_id": "abc"}, format="json")
         assert resp.status_code == 400
 
-    def test_expired_offer_is_400(self, api_client, mocker):
+    def test_expired_offer_is_400(self, auth_client, mocker):
         mocker.patch(
-            "trips.views.create_hotel_booking",
+            "trips.booking.create_hotel_booking",
             side_effect=ValueError("This rate is no longer available to book"),
         )
-        resp = api_client.post(reverse("hotel-booking"), {
-            "offer_id": "stale", "first_name": "A", "last_name": "B", "email": "a@b.com",
+        resp = auth_client.post(reverse("hotel-booking"), {
+            "kind": "hotel", "offer_id": "stale", "first_name": "A",
+            "last_name": "B", "email": "a@b.com",
         }, format="json")
         assert resp.status_code == 400
         assert "no longer available" in resp.data["detail"]
+
+    def test_lists_user_bookings(self, auth_client, mocker):
+        mocker.patch("trips.booking.create_hotel_booking", return_value=self.HOTEL_CONFIRMATION)
+        auth_client.post(reverse("hotel-booking"), {
+            "kind": "hotel", "offer_id": "abc", "first_name": "John",
+            "last_name": "Traveler", "email": "john@example.com",
+        }, format="json")
+        resp = auth_client.get(reverse("hotel-booking"))
+        assert resp.status_code == 200
+        assert len(resp.data) == 1
+        assert resp.data[0]["reference"] == "PyPdNLMVq"
 
 
 class TestNuiteeBookingProvider:

@@ -449,6 +449,7 @@ export default function App() {
           <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <Dashboard
               isAuthenticated={isAuthenticated}
+              token={token}
               onLogin={() => setStep("login")}
               onRegister={() => setStep("register")}
               plan={tripPlan}
@@ -506,6 +507,7 @@ export default function App() {
               selectedFlight={selectedFlight}
               selectedHotel={selectedHotel}
               customerEmail={user?.email}
+              token={token}
               onBack={() => setStep("dashboard")}
             />
           </motion.div>

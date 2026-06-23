@@ -201,3 +201,11 @@ GOOGLE_WEATHER_BASE_URL = config(
 NUITEE_BASE_URL = config("NUITEE_BASE_URL", default="https://api.liteapi.travel/v3.0")
 NUITEE_API_KEY = config("NUITEE_API_KEY", default="")
 NUITEE_PUBLIC_KEY = config("NUITEE_PUBLIC_KEY", default="")
+
+# AI concierge — OpenAI Codex CLI (uses the operator's own codex auth).
+CODEX_BINARY = config("CODEX_BINARY", default="codex")
+CODEX_MODEL = config("CODEX_MODEL", default="")
+CODEX_TIMEOUT_SECONDS = config("CODEX_TIMEOUT_SECONDS", default=180, cast=int)
+# How many recent messages are sent verbatim each turn; older context is carried
+# by the session summary that the agent regenerates whenever a session ends.
+CODEX_HISTORY_WINDOW = config("CODEX_HISTORY_WINDOW", default=16, cast=int)

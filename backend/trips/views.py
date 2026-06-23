@@ -10,12 +10,19 @@ from rest_framework.exceptions import NotFound
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from .models import Trip
+from django.utils import timezone
+
+from .agent import AgentError, run_agent_turn, summarize_session
+from .booking import Holder, book_offer
+from .models import Booking, ChatSession, Trip
 from .serializers import (
+    BookingCreateSerializer,
+    BookingSerializer,
     BudgetEvaluationInputSerializer,
     BudgetTierQuerySerializer,
+    ChatSessionListSerializer,
+    ChatSessionSerializer,
     FlightSearchQuerySerializer,
-    HotelBookingSerializer,
     HotelSearchQuerySerializer,
     TripSerializer,
     WeatherQuerySerializer,
@@ -23,10 +30,8 @@ from .serializers import (
 from .services import (
     DynamicPricingInput,
     FlightSearchInput,
-    HotelBookingInput,
     HotelSearchInput,
     build_dynamic_tier_quotes,
-    create_hotel_booking,
     evaluate_dynamic_budget,
     fetch_destination_weather,
     search_flight_options,
@@ -246,20 +251,34 @@ def hotel_search(request):
     return Response(result, status=status.HTTP_200_OK)
 
 
-@api_view(["POST"])
-@permission_classes([AllowAny])
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
 def hotel_booking(request):
-    serializer = HotelBookingSerializer(data=request.data)
+    """List the signed-in user's bookings (GET) or create one (POST).
+
+    Booking requires authentication — there is no anonymous booking. Bookings
+    are persisted per user and idempotent (the same offer is never booked twice).
+    """
+    if request.method == "GET":
+        bookings = Booking.objects.filter(user=request.user)
+        return Response(BookingSerializer(bookings, many=True).data)
+
+    serializer = BookingCreateSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     payload = serializer.validated_data
-    booking_input = HotelBookingInput(
-        offer_id=payload["offer_id"],
-        first_name=payload["first_name"],
-        last_name=payload["last_name"],
-        email=payload["email"],
-    )
+
     try:
-        result = create_hotel_booking(booking_input)
+        booking, created = book_offer(
+            request.user,
+            kind=payload["kind"],
+            offer_id=payload["offer_id"],
+            holder=Holder(payload["first_name"], payload["last_name"], payload["email"]),
+            title=payload["title"],
+            price=payload["price"],
+            currency=payload["currency"],
+            airline=payload["airline"],
+            trip=Trip.objects.filter(user=request.user).first(),
+        )
     except ValueError as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     except Exception:
@@ -267,7 +286,10 @@ def hotel_booking(request):
             {"detail": "Booking service is temporarily unavailable."},
             status=status.HTTP_502_BAD_GATEWAY,
         )
-    return Response(result, status=status.HTTP_201_CREATED)
+
+    body = BookingSerializer(booking).data
+    body["already_booked"] = not created
+    return Response(body, status=status.HTTP_201_CREATED)
 
 
 class TripListCreateView(generics.ListCreateAPIView):
@@ -303,3 +325,102 @@ class CurrentTripView(generics.RetrieveAPIView):
         if trip is None:
             raise NotFound("No saved trip found for this user.")
         return trip
+
+
+# ---------------------------------------------------------------------------
+# AI concierge chat — sessions, messages, summaries (Codex agent)
+# ---------------------------------------------------------------------------
+class ChatSessionListCreateView(generics.ListCreateAPIView):
+    """List the user's chat sessions, or start a new one."""
+
+    permission_classes = (IsAuthenticated,)
+
+    def get_queryset(self):
+        return ChatSession.objects.filter(user=self.request.user)
+
+    def get_serializer_class(self):
+        # The list view stays light; creating returns the full session.
+        return ChatSessionListSerializer if self.request.method == "GET" else ChatSessionSerializer
+
+    def create(self, request, *args, **kwargs):
+        context = request.data.get("context") or {}
+        if not isinstance(context, dict):
+            context = {}
+        title = (request.data.get("title") or "").strip() or "New conversation"
+        session = ChatSession.objects.create(
+            user=request.user,
+            title=title[:160],
+            context_snapshot=context,
+        )
+        serializer = ChatSessionSerializer(session)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class ChatSessionDetailView(generics.RetrieveAPIView):
+    """Retrieve one session with its full transcript (used to resume)."""
+
+    serializer_class = ChatSessionSerializer
+    permission_classes = (IsAuthenticated,)
+
+    def get_queryset(self):
+        return ChatSession.objects.filter(user=self.request.user)
+
+
+def _get_owned_session(request, pk):
+    try:
+        return ChatSession.objects.get(pk=pk, user=request.user)
+    except ChatSession.DoesNotExist:
+        raise NotFound("Chat session not found.")
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def chat_send_message(request, pk):
+    """Send a user message; run the Codex agent; return the updated session."""
+    session = _get_owned_session(request, pk)
+    content = (request.data.get("content") or "").strip()
+    if not content:
+        return Response({"detail": "Message content is required."},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    # Optionally refresh the trip-context snapshot the agent reads.
+    new_context = request.data.get("context")
+    if isinstance(new_context, dict) and new_context:
+        session.context_snapshot = new_context
+
+    # Run the agent against prior history *before* persisting this turn so the
+    # new message is not double-counted in the transcript.
+    try:
+        reply_text, results = run_agent_turn(session, content)
+    except AgentError as exc:
+        return Response({"detail": str(exc)},
+                        status=status.HTTP_502_BAD_GATEWAY)
+
+    # Name the conversation after its first user message so the history list reads well.
+    is_first_message = not session.messages.exists()
+    if is_first_message and session.title == "New conversation":
+        session.title = (content[:57] + "…") if len(content) > 58 else content
+
+    session.messages.create(role="user", content=content)
+    session.messages.create(role="assistant", content=reply_text, actions=results)
+
+    # Sending into an ended session reopens it.
+    if session.status == ChatSession.Status.ENDED:
+        session.status = ChatSession.Status.ACTIVE
+        session.ended_at = None
+    session.save()
+
+    session.refresh_from_db()
+    return Response(ChatSessionSerializer(session).data, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def chat_end_session(request, pk):
+    """End a session and store an agent-generated summary for later resume."""
+    session = _get_owned_session(request, pk)
+    session.summary = summarize_session(session)
+    session.status = ChatSession.Status.ENDED
+    session.ended_at = timezone.now()
+    session.save(update_fields=["summary", "status", "ended_at", "updated_at"])
+    return Response(ChatSessionSerializer(session).data, status=status.HTTP_200_OK)

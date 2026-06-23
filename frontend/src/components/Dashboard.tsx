@@ -6,6 +6,8 @@ import {
 import { motion } from 'motion/react';
 import { DynamicTierQuote, FlightOption, HotelOption, SavedTrip, TripPlan, WeatherSummary } from '../types/trip';
 import BookingSearch, { BookingTripContext } from './BookingSearch';
+import ChatPanel from './ChatPanel';
+import { ChatTripContext } from '../lib/chat';
 
 type TierKey = 'cheapest' | 'affordable' | 'moderate' | 'luxury';
 
@@ -217,6 +219,7 @@ export default function Dashboard({
   weatherError,
   isWeatherLoading,
   isAuthenticated,
+  token,
   bookingContext,
   selectedFlight,
   selectedHotel,
@@ -239,6 +242,7 @@ export default function Dashboard({
   weatherError: string | null;
   isWeatherLoading: boolean;
   isAuthenticated: boolean;
+  token: string | null;
   bookingContext: BookingTripContext | null;
   selectedFlight: FlightOption | null;
   selectedHotel: HotelOption | null;
@@ -272,6 +276,20 @@ export default function Dashboard({
   }, [effectivePricingSnapshot, savedTrip]);
 
   const selectedPricing = effectivePricingSnapshot?.tiers?.[selectedTier];
+
+  // Trip context handed to the AI concierge so it can reason about this trip.
+  const chatContext = useMemo<ChatTripContext>(() => ({
+    origin: bookingContext?.origin || savedTrip?.origin_country || '',
+    destination: savedTrip?.destination || bookingContext?.destinationCity || '',
+    destinationCountry: bookingContext?.destinationCountry || '',
+    startDate: savedTrip?.start_date || currentTripDates?.startDate || '',
+    endDate: savedTrip?.end_date || currentTripDates?.endDate || '',
+    travelers: savedTrip?.travelers || bookingContext?.travelers || 1,
+    budgetTier: selectedTier,
+    interests: savedTrip?.interests || [],
+    selectedFlight: selectedFlight as unknown as Record<string, unknown> | null,
+    selectedHotel: selectedHotel as unknown as Record<string, unknown> | null,
+  }), [savedTrip, bookingContext, currentTripDates, selectedTier, selectedFlight, selectedHotel]);
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-20 bg-white">
@@ -461,17 +479,19 @@ export default function Dashboard({
           {/* Proceed to booking & payment */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-10 border border-zinc-200 bg-zinc-50/70 px-5 py-4">
             <div className="text-[11px] text-zinc-500">
-              {selectedFlight || selectedHotel
+              {!isAuthenticated
+                ? 'Sign in or create an account to book your selection.'
+                : selectedFlight || selectedHotel
                 ? <>Ready to book — total <span className="font-semibold text-zinc-900">${((selectedFlight?.price || 0) + (selectedHotel?.price || 0)).toFixed(0)}</span> before taxes.</>
                 : 'Select a flight and/or hotel above to continue to booking.'}
             </div>
             <button
-              onClick={onOpenCheckout}
-              disabled={!selectedFlight && !selectedHotel}
+              onClick={isAuthenticated ? onOpenCheckout : onLogin}
+              disabled={isAuthenticated && !selectedFlight && !selectedHotel}
               className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-950 text-white text-[11px] uppercase tracking-[0.25em] font-medium hover:bg-zinc-800 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <Lock className="w-3.5 h-3.5" />
-              Book &amp; Pay
+              {isAuthenticated ? 'Book & Pay' : 'Sign in to Book'}
             </button>
           </div>
 
@@ -506,6 +526,7 @@ export default function Dashboard({
 
           {bookingTab === 'flight' ? (
             <BookingSearch
+              key="flight"
               mode="flight"
               variant="embedded"
               trip={bookingContext}
@@ -514,6 +535,7 @@ export default function Dashboard({
             />
           ) : (
             <BookingSearch
+              key="hotel"
               mode="hotel"
               variant="embedded"
               trip={bookingContext}
@@ -524,152 +546,80 @@ export default function Dashboard({
         </section>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-y-24 gap-x-12">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
 
-        {/* ── Left column: Gemini trip plan content ── */}
-        <section className="lg:col-span-3 space-y-20 border-r border-zinc-100 pr-12">
-          {plan ? (
+        {/* ── Travel Categories — live LiteAPI pricing ── */}
+        <div className="lg:col-span-2 space-y-6">
+          <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-300">Travel Categories</label>
+
+          {isPricingLoading && !effectivePricingSnapshot ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {[0, 1, 2, 3].map((i) => (
+                <TierCardSkeleton key={i} />
+              ))}
+            </div>
+          ) : pricingError && !effectivePricingSnapshot ? (
+            <PricingError message={pricingError} />
+          ) : effectivePricingSnapshot ? (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="space-y-20"
+              className="grid grid-cols-1 sm:grid-cols-2 gap-4"
             >
-              <div className="space-y-6">
-                <div className="space-y-6">
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-300">Optimal Sequence</label>
-                  <div className="space-y-2">
-                    <h3 className="text-4xl font-light tracking-tight">
-                      {currentTripDates
-                        ? formatDateRange(currentTripDates.startDate, currentTripDates.endDate)
-                        : savedTrip
-                          ? formatDateRange(savedTrip.start_date, savedTrip.end_date)
-                          : plan.bestTimeToTravel.period}
-                    </h3>
-                    <div className="flex items-center gap-2 text-sm text-zinc-400">
-                      <span className="w-2 h-2 rounded-full bg-zinc-950" />
-                      {weatherSummary
-                        ? `${weatherSummary.low_c}°C – ${weatherSummary.high_c}°C · ${weatherSummary.condition}`
-                        : plan.bestTimeToTravel.weather}
+              {(['cheapest', 'affordable', 'moderate', 'luxury'] as const).map((tier) => {
+                const entry = effectivePricingSnapshot.tiers[tier];
+                const selected = selectedTier === tier;
+                return (
+                  <button
+                    key={tier}
+                    onClick={() => setSelectedTier(tier)}
+                    className={`w-full flex flex-col items-center justify-center text-center p-6 border transition-all ${
+                      selected
+                        ? 'border-zinc-900 bg-zinc-950 text-white'
+                        : 'border-zinc-200 bg-zinc-50 hover:border-zinc-400'
+                    }`}
+                  >
+                    <div className={`text-[11px] uppercase tracking-[0.25em] font-medium mb-4 ${selected ? 'text-zinc-300' : 'text-zinc-500'}`}>
+                      {tier}
                     </div>
-                  </div>
-                  <p className="text-sm font-light leading-relaxed text-zinc-500 max-w-sm">
-                    {plan.bestTimeToTravel.reason}
-                  </p>
-                </div>
-              </div>
+                    <div className="text-sm font-light mb-1">Flight: ${entry.flight_cost.toFixed(0)}</div>
+                    <div className="text-sm font-light mb-1">Hotel/day: ${entry.hotel_daily_cost.toFixed(0)}</div>
+                    <div className="text-sm font-light mb-1">Living/day: ${entry.local_daily_cost.toFixed(0)}</div>
+                    <div className="text-sm font-light mb-1">Stay: {effectivePricingSnapshot.trip_duration_days} day(s)</div>
+                    <div className="text-lg mt-4 font-semibold tracking-wide">Final: ${entry.total_trip_cost.toFixed(0)}</div>
+                  </button>
+                );
+              })}
             </motion.div>
           ) : (
-            <TripPlanSkeleton />
+            <div className="text-sm text-zinc-500 border border-zinc-200 bg-zinc-50 p-4">
+              Pricing categories are not available.
+            </div>
           )}
-        </section>
+        </div>
 
-        {/* ── Right column: pricing tier cards ── */}
-        <aside className="lg:col-span-2 space-y-12 lg:-ml-4">
-          <div className="space-y-6">
-            <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-300">Travel Categories</label>
-
-            {isPricingLoading && !effectivePricingSnapshot ? (
-              /* Loading skeletons for all 4 tier cards */
-              <div className="space-y-4">
-                {[0, 1, 2, 3].map((i) => (
-                  <TierCardSkeleton key={i} />
-                ))}
-              </div>
-            ) : pricingError && !effectivePricingSnapshot ? (
-              /* Error state */
-              <PricingError
-                message={pricingError}
-              />
-            ) : effectivePricingSnapshot ? (
-              /* Live pricing data */
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="space-y-4"
-              >
-                {(['cheapest', 'affordable', 'moderate', 'luxury'] as const).map((tier) => {
-                  const entry = effectivePricingSnapshot.tiers[tier];
-                  const selected = selectedTier === tier;
-                  return (
-                    <button
-                      key={tier}
-                      onClick={() => setSelectedTier(tier)}
-                      className={`w-full flex flex-col items-center justify-center text-center p-6 border transition-all ${
-                        selected
-                          ? 'border-zinc-900 bg-zinc-950 text-white'
-                          : 'border-zinc-200 bg-zinc-50 hover:border-zinc-400'
-                      }`}
-                    >
-                      <div className={`text-[11px] uppercase tracking-[0.25em] font-medium mb-4 ${selected ? 'text-zinc-300' : 'text-zinc-500'}`}>
-                        {tier}
-                      </div>
-                      <div className="text-sm font-light mb-1">Flight: ${entry.flight_cost.toFixed(0)}</div>
-                      <div className="text-sm font-light mb-1">Hotel/day: ${entry.hotel_daily_cost.toFixed(0)}</div>
-                      <div className="text-sm font-light mb-1">Living/day: ${entry.local_daily_cost.toFixed(0)}</div>
-                      <div className="text-sm font-light mb-1">Stay: {effectivePricingSnapshot.trip_duration_days} day(s)</div>
-                      <div className="text-lg mt-4 font-semibold tracking-wide">Final: ${entry.total_trip_cost.toFixed(0)}</div>
-                    </button>
-                  );
-                })}
-              </motion.div>
-            ) : (
-              <div className="text-sm text-zinc-500 border border-zinc-200 bg-zinc-50 p-4">
-                Pricing categories are not available.
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-6 pt-12 border-t border-zinc-100">
-            {plan ? (
-              <div className="text-[11px] leading-relaxed text-zinc-400 font-light italic">
-                {plan.budget.foodInfo}
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <Skeleton className="h-2 w-full" />
-                <Skeleton className="h-2 w-4/5" />
-                <Skeleton className="h-2 w-3/5" />
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-6 pt-12 border-t border-zinc-100">
-            <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-300">Weather at Destination</label>
-            {isWeatherLoading ? (
-              <WeatherSkeleton />
-            ) : weatherSummary ? (
-              <WeatherWidget summary={weatherSummary} />
-            ) : (
-              <p className="text-[11px] text-zinc-400 font-light">
-                {weatherError ?? 'Weather data unavailable.'}
-              </p>
-            )}
-          </div>
-
-          <div className="space-y-8 pt-12 border-t border-zinc-100">
-            <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-300">Occurrences</label>
-            {plan ? (
-              <div className="space-y-8">
-                {plan.events.map((event, i) => (
-                  <div key={i} className="space-y-2">
-                    <div className="text-[10px] font-bold text-zinc-950">{event.date}</div>
-                    <div className="text-xs text-zinc-500 font-light leading-snug">{event.name} — {event.description}</div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="space-y-6">
-                {[0, 1, 2].map((i) => (
-                  <div key={i} className="space-y-2">
-                    <Skeleton className="h-2 w-16" />
-                    <Skeleton className="h-2 w-full" />
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+        {/* ── Weather at destination ── */}
+        <aside className="space-y-6">
+          <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-300">Weather at Destination</label>
+          {isWeatherLoading ? (
+            <WeatherSkeleton />
+          ) : weatherSummary ? (
+            <WeatherWidget summary={weatherSummary} />
+          ) : (
+            <p className="text-[11px] text-zinc-400 font-light">
+              {weatherError ?? 'Weather data unavailable.'}
+            </p>
+          )}
         </aside>
       </div>
+
+      {/* ── AI Travel Concierge — Codex-backed chat ── */}
+      <ChatPanel
+        token={token}
+        context={chatContext}
+        isAuthenticated={isAuthenticated}
+        onLogin={onLogin}
+      />
 
       <footer className="mt-48 pt-20 border-t border-zinc-100 flex justify-between items-center text-[10px] uppercase tracking-[0.3em] font-bold text-zinc-300">
         <div>© 2026 Vantage Travel</div>

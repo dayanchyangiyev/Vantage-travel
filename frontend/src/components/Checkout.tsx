@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { FlightOption, HotelOption } from '../types/trip';
 import { BookingTripContext } from './BookingSearch';
-import { bookHotel } from '../lib/search';
+import { createBooking } from '../lib/search';
 
 // ---------------------------------------------------------------------------
 // This is a MOCK checkout — no real charge is ever made. It collects realistic
@@ -175,17 +175,20 @@ interface CheckoutProps {
   selectedFlight: FlightOption | null;
   selectedHotel: HotelOption | null;
   customerEmail?: string;
+  token?: string | null;
   onBack: () => void;
 }
 
 export default function Checkout({
-  trip, selectedFlight, selectedHotel, customerEmail, onBack,
+  trip, selectedFlight, selectedHotel, customerEmail, token, onBack,
 }: CheckoutProps) {
   const [stage, setStage] = useState<Stage>('details');
   const [bookingRef, setBookingRef] = useState<string>('');
+  const [flightRef, setFlightRef] = useState<string>('');
   const [bookingStatus, setBookingStatus] = useState<string>('CONFIRMED');
   const [hotelConfCode, setHotelConfCode] = useState<string>('');
   const [isRealBooking, setIsRealBooking] = useState<boolean>(false);
+  const [alreadyBooked, setAlreadyBooked] = useState<boolean>(false);
   const [bookingError, setBookingError] = useState<string | null>(null);
 
   // Traveler details
@@ -268,26 +271,44 @@ export default function Checkout({
     if (!validatePayment()) return;
     setBookingError(null);
     setStage('processing');
+    const holder = { firstName: firstName.trim(), lastName: lastName.trim(), email: email.trim() };
     try {
+      let already = false;
+
       if (selectedHotel) {
         // Real LiteAPI sandbox booking (prebook → book). Appears in Nuitee Connect.
-        const conf = await bookHotel({
-          offerId: selectedHotel.id,
-          firstName: firstName.trim(),
-          lastName: lastName.trim(),
-          email: email.trim(),
-        });
-        setBookingRef(conf.booking_id);
-        setBookingStatus(conf.status || 'CONFIRMED');
-        setHotelConfCode(conf.hotel_confirmation_code || '');
-        setIsRealBooking(true);
-      } else {
-        // Flight-only: flight offers expire within minutes, so this stays a local
-        // demo confirmation rather than a live supplier booking.
-        await new Promise<void>((resolve) => window.setTimeout(resolve, 1400));
-        setBookingRef(makeBookingRef());
-        setIsRealBooking(false);
+        const conf = await createBooking({
+          kind: 'hotel', offerId: selectedHotel.id, ...holder,
+          title: selectedHotel.name, price: selectedHotel.price, currency: selectedHotel.currency,
+        }, token);
+        setBookingRef(conf.reference);
+        setBookingStatus(conf.status);
+        setHotelConfCode(conf.hotelConfirmationCode || '');
+        setIsRealBooking(conf.isReal);
+        already = already || conf.alreadyBooked;
       }
+
+      if (selectedFlight) {
+        // Flight offers expire within minutes, so this is a recorded demo booking
+        // (persisted to the account when signed in) rather than a live hold.
+        const conf = await createBooking({
+          kind: 'flight', offerId: selectedFlight.id, ...holder,
+          title: selectedFlight.airline, airline: selectedFlight.airline,
+          price: selectedFlight.price, currency: selectedFlight.currency,
+        }, token);
+        setFlightRef(conf.reference);
+        if (!selectedHotel) {
+          setBookingRef(conf.reference);
+          setBookingStatus(conf.status);
+          setIsRealBooking(false);
+        }
+        already = already || conf.alreadyBooked;
+      }
+
+      if (!selectedFlight && !selectedHotel) {
+        setBookingRef(makeBookingRef());
+      }
+      setAlreadyBooked(already);
       setStage('confirmed');
       scrollTop();
     } catch (e) {
@@ -406,9 +427,13 @@ export default function Checkout({
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-50 mb-6">
               <CalendarCheck className="w-8 h-8 text-emerald-600" strokeWidth={1.5} />
             </div>
-            <h3 className="text-3xl font-light tracking-tight mb-2">Booking Confirmed</h3>
+            <h3 className="text-3xl font-light tracking-tight mb-2">
+              {alreadyBooked ? 'Already Booked' : 'Booking Confirmed'}
+            </h3>
             <p className="text-sm text-zinc-500 mb-8">
-              A confirmation has been sent to <span className="text-zinc-900">{email}</span>.
+              {alreadyBooked
+                ? 'You already booked this — we kept your original reference instead of charging again.'
+                : <>A confirmation has been sent to <span className="text-zinc-900">{email}</span>.</>}
             </p>
             <div className="border border-zinc-200 text-left">
               <div className="flex items-center justify-between px-5 py-4 bg-zinc-950 text-white">
@@ -421,6 +446,9 @@ export default function Checkout({
                 <div className="flex justify-between"><span className="text-zinc-400">Trip</span><span>{trip.destinationCity}, {trip.destinationCountry}</span></div>
                 <div className="flex justify-between"><span className="text-zinc-400">Dates</span><span>{trip.startDate} → {trip.endDate}</span></div>
                 {selectedFlight && <div className="flex justify-between"><span className="text-zinc-400">Flight</span><span>{selectedFlight.airline}</span></div>}
+                {selectedFlight && selectedHotel && flightRef && (
+                  <div className="flex justify-between"><span className="text-zinc-400">Flight reference</span><span className="tabular-nums">{flightRef}</span></div>
+                )}
                 {selectedHotel && <div className="flex justify-between"><span className="text-zinc-400">Hotel</span><span className="truncate ml-4">{selectedHotel.name}</span></div>}
                 {isRealBooking && hotelConfCode && (
                   <div className="flex justify-between"><span className="text-zinc-400">Hotel confirmation</span><span className="tabular-nums">{hotelConfCode}</span></div>

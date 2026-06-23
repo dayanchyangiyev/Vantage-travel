@@ -26,8 +26,12 @@ export interface HotelSearchParams {
   currency?: string;
 }
 
-async function getJson<T>(url: string, fallbackError: string): Promise<T> {
-  const response = await fetch(url);
+async function getJson<T>(
+  url: string,
+  fallbackError: string,
+  headers?: Record<string, string>
+): Promise<T> {
+  const response = await fetch(url, headers ? { headers } : undefined);
   if (!response.ok) {
     let detail = fallbackError;
     try {
@@ -91,19 +95,52 @@ export interface BookingConfirmation {
   currency: string | null;
 }
 
+export interface BookingParams {
+  kind: "flight" | "hotel";
+  offerId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  title?: string;
+  airline?: string;
+  price?: number | null;
+  currency?: string;
+}
+
+/** Normalized result whether the booking was persisted (auth) or a demo. */
+export interface BookingResult {
+  reference: string;
+  status: string;
+  hotelConfirmationCode: string | null;
+  isReal: boolean;
+  alreadyBooked: boolean;
+}
+
 /**
- * Create a REAL booking against the LiteAPI (Nuitee) sandbox. The sandbox key is
- * test-only — no money is charged — but the booking appears in Nuitee Connect.
+ * Create a booking. Hotels book for REAL against the LiteAPI (Nuitee) sandbox
+ * (test-only, no charge, appears in Nuitee Connect); flights are recorded as a
+ * demo confirmation. When a token is supplied the booking is persisted to the
+ * user's account and is idempotent (the same offer is never booked twice).
  */
-export async function bookHotel(params: HotelBookingParams): Promise<BookingConfirmation> {
+export async function createBooking(
+  params: BookingParams,
+  token?: string | null
+): Promise<BookingResult> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(`${API_BASE}/trips/bookings/`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({
+      kind: params.kind,
       offer_id: params.offerId,
       first_name: params.firstName,
       last_name: params.lastName,
       email: params.email,
+      title: params.title || "",
+      airline: params.airline || "",
+      price: params.price ?? null,
+      currency: params.currency || "USD",
     }),
   });
   if (!response.ok) {
@@ -116,7 +153,36 @@ export async function bookHotel(params: HotelBookingParams): Promise<BookingConf
     }
     throw new Error(detail);
   }
-  return response.json();
+  const data = await response.json();
+  // Persisted bookings (auth) return the Booking row; anonymous returns the raw confirmation.
+  return {
+    reference: data.reference || data.booking_id,
+    status: data.status || "CONFIRMED",
+    hotelConfirmationCode:
+      data.hotel_confirmation_code ?? data.details?.confirmation?.hotel_confirmation_code ?? null,
+    isReal: data.is_real ?? params.kind === "hotel",
+    alreadyBooked: data.already_booked ?? false,
+  };
+}
+
+export interface BookingRecord {
+  id: number;
+  kind: "flight" | "hotel";
+  offer_id: string;
+  reference: string;
+  status: string;
+  title: string;
+  price: number | null;
+  currency: string;
+  is_real: boolean;
+  created_at: string;
+}
+
+/** List the authenticated user's bookings. */
+export async function listBookings(token: string): Promise<BookingRecord[]> {
+  return getJson<BookingRecord[]>(`${API_BASE}/trips/bookings/`, "Failed to load bookings.", {
+    Authorization: `Bearer ${token}`,
+  });
 }
 
 /**

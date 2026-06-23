@@ -7,7 +7,7 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_FLOOR
 from typing import Any, Dict, List, TypedDict
 from urllib.error import HTTPError
@@ -453,15 +453,165 @@ class GoogleWeatherProvider:
         }
 
 
+# WMO weather codes → text containing the keywords the UI maps to icons
+# (rain / cloud / sun / clear).
+_WMO_CONDITIONS = {
+    0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Fog", 48: "Fog", 51: "Light drizzle", 53: "Drizzle", 55: "Heavy drizzle",
+    56: "Freezing drizzle", 57: "Freezing drizzle",
+    61: "Light rain", 63: "Rain", 65: "Heavy rain",
+    66: "Freezing rain", 67: "Freezing rain",
+    71: "Light snow", 73: "Snow", 75: "Heavy snow", 77: "Snow grains",
+    80: "Rain showers", 81: "Rain showers", 82: "Heavy rain showers",
+    85: "Snow showers", 86: "Snow showers",
+    95: "Thunderstorm", 96: "Thunderstorm", 99: "Thunderstorm with hail",
+}
+
+
+class OpenMeteoWeatherProvider:
+    """Free, global, keyless weather — used as a fallback and for far-future trips.
+
+    Near dates use the 16-day forecast; dates beyond that fall back to the same
+    calendar window one year earlier (a realistic seasonal reference) via the
+    historical archive — far better than reporting today's conditions.
+    """
+
+    GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
+    FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+    ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+
+    def _geocode(self, city: str, country: str) -> tuple[float, float]:
+        data = _http_request_json(
+            "GET", self.GEOCODE_URL,
+            params={"name": city, "count": 5, "language": "en", "format": "json"},
+        )
+        results = data.get("results") or []
+        if not results:
+            raise ValueError(f"Cannot geocode '{city}, {country}'.")
+        # Prefer a result whose country matches, else take the top hit.
+        target = (country or "").strip().lower()
+        chosen = next(
+            (r for r in results if (r.get("country") or "").lower() == target),
+            results[0],
+        )
+        return float(chosen["latitude"]), float(chosen["longitude"])
+
+    def fetch_summary(
+        self,
+        destination_city: str,
+        destination_country: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> Dict[str, Any]:
+        lat, lng = self._geocode(destination_city, destination_country)
+        today = date.today()
+        trip_start = _parse_date(start_date) if start_date else today
+        trip_end = _parse_date(end_date) if end_date else trip_start
+
+        days_until = (trip_start - today).days
+        within_forecast = 0 <= days_until <= 14 and (trip_end - today).days <= 15
+
+        daily = "temperature_2m_max,temperature_2m_min,weathercode,precipitation_probability_max"
+        if within_forecast:
+            params = {
+                "latitude": lat, "longitude": lng, "daily": daily,
+                "hourly": "relative_humidity_2m", "timezone": "auto",
+                "start_date": trip_start.isoformat(), "end_date": trip_end.isoformat(),
+            }
+            url = self.FORECAST_URL
+            is_forecast = True
+            label = (f"Forecast for your trip "
+                     f"({trip_start.strftime('%b %d')} – {trip_end.strftime('%b %d')})")
+        else:
+            # Same window, one year ago — a seasonal reference from the archive.
+            ref_start = trip_start.replace(year=trip_start.year - 1)
+            ref_end = trip_end.replace(year=trip_end.year - 1)
+            params = {
+                "latitude": lat, "longitude": lng,
+                "daily": "temperature_2m_max,temperature_2m_min,weathercode,precipitation_sum",
+                "hourly": "relative_humidity_2m", "timezone": "auto",
+                "start_date": ref_start.isoformat(), "end_date": ref_end.isoformat(),
+            }
+            url = self.ARCHIVE_URL
+            is_forecast = False
+            label = (f"Seasonal reference for {trip_start.strftime('%B')} "
+                     f"(historical {ref_start.year})")
+
+        data = _http_request_json("GET", url, params=params)
+        result = self._parse(data)
+        result["date_label"] = label
+        result["is_forecast"] = is_forecast
+        return result
+
+    @staticmethod
+    def _parse(data: Dict[str, Any]) -> Dict[str, Any]:
+        daily = data.get("daily") or {}
+        highs = [t for t in (daily.get("temperature_2m_max") or []) if t is not None]
+        lows = [t for t in (daily.get("temperature_2m_min") or []) if t is not None]
+        codes = [c for c in (daily.get("weathercode") or []) if c is not None]
+        if not highs or not lows:
+            raise ValueError("Open-Meteo returned no temperature data.")
+
+        hourly = data.get("hourly") or {}
+        humidities = [h for h in (hourly.get("relative_humidity_2m") or []) if h is not None]
+
+        # Precipitation chance: probability when forecasting, else share of wet days.
+        probs = [p for p in (daily.get("precipitation_probability_max") or []) if p is not None]
+        if probs:
+            precip_pct = round(sum(probs) / len(probs))
+        else:
+            sums = [s for s in (daily.get("precipitation_sum") or []) if s is not None]
+            precip_pct = round(100 * sum(1 for s in sums if s > 0.1) / len(sums)) if sums else 0
+
+        avg_high = round(sum(highs) / len(highs), 1)
+        avg_low = round(sum(lows) / len(lows), 1)
+        avg_humidity = round(sum(humidities) / len(humidities)) if humidities else 0
+        condition = (
+            _WMO_CONDITIONS.get(max(set(codes), key=codes.count), "Varied")
+            if codes else "Varied"
+        )
+
+        def to_f(c: float) -> float:
+            return round(c * 9 / 5 + 32, 1)
+
+        return {
+            "condition": condition,
+            "high_c": avg_high, "low_c": avg_low,
+            "high_f": to_f(avg_high), "low_f": to_f(avg_low),
+            "humidity_pct": avg_humidity, "precipitation_pct": precip_pct,
+        }
+
+
 def fetch_destination_weather(
     destination_city: str,
     destination_country: str,
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> Dict[str, Any]:
-    return GoogleWeatherProvider().fetch_summary(
-        destination_city, destination_country, start_date, end_date
+    """Weather summary for a destination.
+
+    Google Weather only forecasts ~10 days, so for trips further out (the common
+    case) and for regions Google doesn't cover, we use Open-Meteo — which also
+    provides a realistic seasonal reference from history for far-future dates.
+    """
+    today = date.today()
+    trip_start = _parse_date(start_date) if start_date else None
+    near = bool(trip_start and 0 <= (trip_start - today).days <= 9)
+
+    # For near trips Google's live forecast is best; otherwise prefer Open-Meteo's
+    # seasonal reference. Whichever is primary, the other is the fallback.
+    primary, fallback = (
+        (GoogleWeatherProvider, OpenMeteoWeatherProvider) if near
+        else (OpenMeteoWeatherProvider, GoogleWeatherProvider)
     )
+    try:
+        return primary().fetch_summary(
+            destination_city, destination_country, start_date, end_date
+        )
+    except Exception:
+        return fallback().fetch_summary(
+            destination_city, destination_country, start_date, end_date
+        )
 
 
 def _normalize_duration_days(departure_date: str, return_date: str) -> int:
@@ -1158,3 +1308,39 @@ def create_hotel_booking(input_data: HotelBookingInput) -> BookingConfirmation:
     if not input_data.offer_id:
         raise ValueError("A hotel offer is required to book.")
     return NuiteeBookingProvider().book_hotel(input_data)
+
+
+@dataclass(frozen=True)
+class FlightBookingInput:
+    offer_id: str
+    first_name: str
+    last_name: str
+    email: str
+    airline: str = ""
+    price: float | None = None
+    currency: str = "USD"
+
+
+def _make_booking_reference(prefix: str = "VTG") -> str:
+    import secrets
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    return f"{prefix}-" + "".join(secrets.choice(alphabet) for _ in range(6))
+
+
+def create_flight_booking(input_data: FlightBookingInput) -> BookingConfirmation:
+    """Issue a demo flight confirmation.
+
+    LiteAPI's sandbox does not support holding/booking flight offers (they expire
+    within minutes), so this records a demo confirmation rather than a live
+    supplier booking. It is intentionally deterministic and side-effect free.
+    """
+    if not input_data.offer_id:
+        raise ValueError("A flight offer is required to book.")
+    return {
+        "booking_id": _make_booking_reference(),
+        "supplier_booking_id": None,
+        "status": "CONFIRMED",
+        "hotel_confirmation_code": None,
+        "price": float(input_data.price) if input_data.price is not None else None,
+        "currency": input_data.currency or "USD",
+    }

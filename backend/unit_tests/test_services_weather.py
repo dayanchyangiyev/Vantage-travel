@@ -4,7 +4,11 @@ import pytest
 
 from django.conf import settings
 
-from trips.services import GoogleWeatherProvider, fetch_destination_weather
+from trips.services import (
+    GoogleWeatherProvider,
+    OpenMeteoWeatherProvider,
+    fetch_destination_weather,
+)
 
 class TestGoogleWeatherProvider:
     @pytest.fixture
@@ -141,10 +145,39 @@ class TestGoogleWeatherProvider:
         with pytest.raises(ValueError, match="isn't available for Tokyo, Japan"):
             provider.fetch_summary("Tokyo", "Japan")
 
-    def test_fetch_destination_weather_helper(self, mocker):
-        mock_summary = mocker.patch.object(GoogleWeatherProvider, "fetch_summary", return_value={"mock": "data"})
-        
-        res = fetch_destination_weather("Paris", "France", "2026-05-10", "2026-05-15")
-        
-        assert res == {"mock": "data"}
-        mock_summary.assert_called_once_with("Paris", "France", "2026-05-10", "2026-05-15")
+    def test_fetch_destination_weather_near_uses_google(self, mocker):
+        """Trips within Google's forecast window use Google as primary."""
+        g = mocker.patch.object(GoogleWeatherProvider, "fetch_summary", return_value={"src": "google"})
+        o = mocker.patch.object(OpenMeteoWeatherProvider, "fetch_summary", return_value={"src": "openmeteo"})
+        near = (date.today() + timedelta(days=2)).isoformat()
+        near_end = (date.today() + timedelta(days=5)).isoformat()
+
+        res = fetch_destination_weather("Paris", "France", near, near_end)
+
+        assert res == {"src": "google"}
+        g.assert_called_once_with("Paris", "France", near, near_end)
+        o.assert_not_called()
+
+    def test_fetch_destination_weather_far_uses_openmeteo(self, mocker):
+        """Far-future trips (beyond Google's window) prefer Open-Meteo's seasonal data."""
+        g = mocker.patch.object(GoogleWeatherProvider, "fetch_summary", return_value={"src": "google"})
+        o = mocker.patch.object(OpenMeteoWeatherProvider, "fetch_summary", return_value={"src": "openmeteo"})
+        far = (date.today() + timedelta(days=60)).isoformat()
+        far_end = (date.today() + timedelta(days=64)).isoformat()
+
+        res = fetch_destination_weather("Paris", "France", far, far_end)
+
+        assert res == {"src": "openmeteo"}
+        o.assert_called_once_with("Paris", "France", far, far_end)
+        g.assert_not_called()
+
+    def test_fetch_destination_weather_falls_back_on_failure(self, mocker):
+        """If the primary provider fails (e.g. 404 regional gap), the other is used."""
+        mocker.patch.object(OpenMeteoWeatherProvider, "fetch_summary", side_effect=ValueError("boom"))
+        g = mocker.patch.object(GoogleWeatherProvider, "fetch_summary", return_value={"src": "google"})
+        far = (date.today() + timedelta(days=60)).isoformat()
+        far_end = (date.today() + timedelta(days=64)).isoformat()
+
+        res = fetch_destination_weather("Tokyo", "Japan", far, far_end)
+
+        assert res == {"src": "google"}

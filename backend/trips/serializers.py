@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from .models import Trip
+from .models import Booking, ChatMessage, ChatSession, Trip
 from .services import VALID_COMFORT_TIERS
 
 
@@ -116,3 +116,66 @@ class HotelBookingSerializer(serializers.Serializer):
     first_name = serializers.CharField(max_length=80)
     last_name = serializers.CharField(max_length=80)
     email = serializers.EmailField()
+
+
+class BookingCreateSerializer(serializers.Serializer):
+    """Create a flight or hotel booking from a selected offer."""
+
+    kind = serializers.ChoiceField(choices=["flight", "hotel"], default="hotel")
+    offer_id = serializers.CharField()
+    first_name = serializers.CharField(max_length=80)
+    last_name = serializers.CharField(max_length=80)
+    email = serializers.EmailField()
+    # Optional display metadata captured from the selected option.
+    title = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+    airline = serializers.CharField(max_length=120, required=False, allow_blank=True, default="")
+    price = serializers.DecimalField(
+        max_digits=12, decimal_places=2, required=False, allow_null=True, default=None
+    )
+    currency = serializers.CharField(max_length=8, required=False, allow_blank=True, default="")
+
+
+class BookingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Booking
+        fields = (
+            "id", "kind", "offer_id", "reference", "supplier_reference", "status",
+            "title", "price", "currency", "is_real", "created_at",
+        )
+        read_only_fields = fields
+
+
+class ChatMessageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ChatMessage
+        fields = ("id", "role", "content", "actions", "created_at")
+        read_only_fields = fields
+
+
+class ChatSessionSerializer(serializers.ModelSerializer):
+    """Full session with its message transcript — used for detail + send."""
+
+    messages = ChatMessageSerializer(many=True, read_only=True)
+    message_count = serializers.IntegerField(source="messages.count", read_only=True)
+
+    class Meta:
+        model = ChatSession
+        fields = (
+            "id", "title", "status", "summary", "context_snapshot",
+            "created_at", "updated_at", "ended_at", "message_count", "messages",
+        )
+        read_only_fields = fields
+
+
+class ChatSessionListSerializer(serializers.ModelSerializer):
+    """Lightweight session row for the history list (no full transcript)."""
+
+    message_count = serializers.IntegerField(source="messages.count", read_only=True)
+
+    class Meta:
+        model = ChatSession
+        fields = (
+            "id", "title", "status", "summary",
+            "created_at", "updated_at", "ended_at", "message_count",
+        )
+        read_only_fields = fields

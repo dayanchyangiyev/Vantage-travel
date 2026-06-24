@@ -41,6 +41,19 @@ export interface FlightOption {
   origin: string;
   destination: string;
   provider: string;
+  // Round-trip fields — present only when a return date was searched.
+  // `price` is then the combined (outbound + return) total.
+  round_trip?: boolean;
+  outbound_price?: number;
+  return_price?: number;
+  return_airline?: string;
+  return_stops?: number;
+  return_duration_minutes?: number;
+  return_departure_time?: string;
+  return_arrival_time?: string;
+  return_origin?: string;
+  return_destination?: string;
+  return_offer_id?: string;
 }
 
 export interface HotelOption {

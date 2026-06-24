@@ -343,10 +343,20 @@ export default function Checkout({
           <div className="flex items-start gap-3 px-5 py-4">
             <Plane className="w-4 h-4 text-zinc-400 mt-0.5" strokeWidth={1.5} />
             <div className="flex-1">
-              <div className="text-sm text-zinc-900">{selectedFlight.airline}</div>
+              <div className="text-sm text-zinc-900">
+                {selectedFlight.airline}
+                <span className="ml-2 text-[9px] uppercase tracking-widest text-zinc-400">
+                  {selectedFlight.round_trip ? 'Round trip' : 'One way'}
+                </span>
+              </div>
               <div className="text-[11px] text-zinc-400">
                 {selectedFlight.origin}–{selectedFlight.destination} · {selectedFlight.stops <= 0 ? 'Direct' : `${selectedFlight.stops} stop(s)`}
               </div>
+              {selectedFlight.round_trip && (
+                <div className="text-[11px] text-zinc-400">
+                  Return {selectedFlight.return_origin}–{selectedFlight.return_destination} · {(selectedFlight.return_stops ?? 0) <= 0 ? 'Direct' : `${selectedFlight.return_stops} stop(s)`}
+                </div>
+              )}
             </div>
             <div className="text-sm tabular-nums">{money(flightTotal)}</div>
           </div>
@@ -447,10 +457,13 @@ export default function Checkout({
                     <span className="text-base font-medium tracking-widest tabular-nums">{flightRef}</span>
                   </div>
                   <div className="space-y-2 px-5 py-4 text-sm">
-                    <div className="flex justify-between"><span className="text-zinc-400">Airline</span><span>{selectedFlight.airline}</span></div>
-                    <div className="flex justify-between"><span className="text-zinc-400">Route</span><span>{selectedFlight.origin}–{selectedFlight.destination} · {selectedFlight.stops <= 0 ? 'Direct' : `${selectedFlight.stops} stop(s)`}</span></div>
+                    <div className="flex justify-between"><span className="text-zinc-400">Trip type</span><span>{selectedFlight.round_trip ? 'Round trip' : 'One way'}</span></div>
+                    <div className="flex justify-between"><span className="text-zinc-400">Outbound</span><span>{selectedFlight.airline} · {selectedFlight.origin}–{selectedFlight.destination}</span></div>
+                    {selectedFlight.round_trip && (
+                      <div className="flex justify-between"><span className="text-zinc-400">Return</span><span>{selectedFlight.return_airline || selectedFlight.airline} · {selectedFlight.return_origin}–{selectedFlight.return_destination}</span></div>
+                    )}
                     <div className="flex justify-between"><span className="text-zinc-400">Status</span><span className="font-semibold text-emerald-600">{bookingStatus}</span></div>
-                    <div className="flex justify-between"><span className="text-zinc-400">Fare</span><span className="tabular-nums">{money(flightTotal)}</span></div>
+                    <div className="flex justify-between"><span className="text-zinc-400">Fare</span><span className="tabular-nums">{money(flightTotal)}{selectedFlight.round_trip ? ' (incl. return)' : ''}</span></div>
                   </div>
                   <div className="flex items-center gap-2 border-t border-zinc-100 px-5 py-2.5">
                     <ShieldCheck className="h-3.5 w-3.5 text-zinc-400" />

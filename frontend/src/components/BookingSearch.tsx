@@ -60,9 +60,34 @@ const inputClass =
 // ---------------------------------------------------------------------------
 // Option cards
 // ---------------------------------------------------------------------------
+function FlightLeg({
+  label, dep, arr, from, to, duration, stops, muted,
+}: {
+  label: string; dep: string; arr: string; from: string; to: string;
+  duration: number; stops: number; muted: boolean;
+}) {
+  return (
+    <div>
+      <div className={`mb-1 text-[9px] uppercase tracking-[0.2em] font-bold ${muted ? 'text-zinc-500' : 'text-zinc-300'}`}>
+        {label}
+      </div>
+      <div className={`flex items-center justify-between text-[11px] ${muted ? 'text-zinc-300' : 'text-zinc-500'}`}>
+        <span>{formatClock(dep)} → {formatClock(arr)}</span>
+        <span>{from}–{to}</span>
+      </div>
+      <div className={`mt-1 flex items-center gap-3 text-[10px] uppercase tracking-wider ${muted ? 'text-zinc-400' : 'text-zinc-400'}`}>
+        <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{formatDuration(duration)}</span>
+        <span>·</span>
+        <span>{stopsLabel(stops)}</span>
+      </div>
+    </div>
+  );
+}
+
 function FlightCard({
   option, selected, onSelect,
 }: { option: FlightOption; selected: boolean; onSelect: () => void }) {
+  const isRoundTrip = !!option.round_trip;
   return (
     <button
       onClick={onSelect}
@@ -78,21 +103,43 @@ function FlightCard({
       <div className="flex items-center gap-2 mb-3">
         <Plane className={`w-4 h-4 ${selected ? 'text-zinc-300' : 'text-zinc-400'}`} strokeWidth={1.5} />
         <span className="text-sm font-medium truncate">{option.airline}</span>
-      </div>
-      <div className="text-2xl font-light tracking-tight mb-3">
-        ${option.price.toFixed(0)}
-        <span className={`ml-1 text-[10px] uppercase tracking-widest ${selected ? 'text-zinc-400' : 'text-zinc-300'}`}>
-          {option.currency}
+        <span className={`ml-auto shrink-0 text-[8px] uppercase tracking-[0.15em] font-bold px-1.5 py-0.5 ${
+          selected ? 'bg-white/15 text-zinc-200' : 'bg-zinc-100 text-zinc-400'
+        }`}>
+          {isRoundTrip ? 'Round trip' : 'One way'}
         </span>
       </div>
-      <div className={`flex items-center justify-between text-[11px] ${selected ? 'text-zinc-300' : 'text-zinc-500'}`}>
-        <span>{formatClock(option.departure_time)} → {formatClock(option.arrival_time)}</span>
-        <span>{option.origin}–{option.destination}</span>
+      <div className="text-2xl font-light tracking-tight mb-1">
+        ${option.price.toFixed(0)}
+        <span className={`ml-1 text-[10px] uppercase tracking-widest ${selected ? 'text-zinc-400' : 'text-zinc-300'}`}>
+          {option.currency}{isRoundTrip ? ' total' : ''}
+        </span>
       </div>
-      <div className={`mt-2 flex items-center gap-3 text-[10px] uppercase tracking-wider ${selected ? 'text-zinc-400' : 'text-zinc-400'}`}>
-        <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{formatDuration(option.duration_minutes)}</span>
-        <span>·</span>
-        <span>{stopsLabel(option.stops)}</span>
+      {isRoundTrip && (
+        <div className={`mb-3 text-[10px] ${selected ? 'text-zinc-400' : 'text-zinc-400'}`}>
+          ${(option.outbound_price ?? 0).toFixed(0)} out · ${(option.return_price ?? 0).toFixed(0)} return
+        </div>
+      )}
+
+      <div className="space-y-3">
+        <FlightLeg
+          label={isRoundTrip ? 'Outbound' : 'Itinerary'}
+          dep={option.departure_time} arr={option.arrival_time}
+          from={option.origin} to={option.destination}
+          duration={option.duration_minutes} stops={option.stops} muted={selected}
+        />
+        {isRoundTrip && (
+          <div className={`pt-3 border-t ${selected ? 'border-white/15' : 'border-zinc-100'}`}>
+            <FlightLeg
+              label={`Return · ${option.return_airline || option.airline}`}
+              dep={option.return_departure_time || ''} arr={option.return_arrival_time || ''}
+              from={option.return_origin || option.destination}
+              to={option.return_destination || option.origin}
+              duration={option.return_duration_minutes || 0}
+              stops={option.return_stops ?? 0} muted={selected}
+            />
+          </div>
+        )}
       </div>
     </button>
   );

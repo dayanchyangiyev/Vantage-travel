@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_FLOOR
-from typing import Any, Dict, List, TypedDict
+from typing import Any, Dict, List, NotRequired, TypedDict
 from urllib.error import HTTPError
 
 from django.conf import settings
@@ -840,6 +840,19 @@ class FlightOption(TypedDict):
     origin: str
     destination: str
     provider: str
+    # Round-trip fields — present only when a return date was searched. `price`
+    # is then the combined (outbound + return) total.
+    round_trip: NotRequired[bool]
+    outbound_price: NotRequired[float]
+    return_price: NotRequired[float]
+    return_airline: NotRequired[str]
+    return_stops: NotRequired[int]
+    return_duration_minutes: NotRequired[int]
+    return_departure_time: NotRequired[str]
+    return_arrival_time: NotRequired[str]
+    return_origin: NotRequired[str]
+    return_destination: NotRequired[str]
+    return_offer_id: NotRequired[str]
 
 
 class HotelOption(TypedDict):
@@ -1034,35 +1047,22 @@ class NuiteeFlightProvider:
             "provider": provider.get("code") or "nuitee",
         }
 
-    def search_options(self, input_data: FlightSearchInput) -> CategorizedFlightResult:
-        origin_code = self._resolve_airport(input_data.origin_city)
-        destination_code = self._resolve_airport(input_data.destination_city)
+    def _search_leg(
+        self, origin_code: str, destination_code: str, date: str, adults: int, currency: str
+    ) -> List[Dict[str, Any]]:
+        """Search a single one-way leg; return de-duplicated flight options.
 
-        legs = [
-            {
-                "origin": origin_code,
-                "destination": destination_code,
-                "date": input_data.departure_date,
-            }
-        ]
-        if input_data.return_date:
-            legs.append(
-                {
-                    "origin": destination_code,
-                    "destination": origin_code,
-                    "date": input_data.return_date,
-                }
-            )
-
+        LiteAPI's flights/rates returns one-way OUTBOUND journeys per request, so
+        a round trip is two separate leg searches that we combine ourselves.
+        """
         response = self.client.post(
             "flights/rates",
             {
-                "legs": legs,
-                "adults": input_data.adults,
-                "currency": input_data.currency,
+                "legs": [{"origin": origin_code, "destination": destination_code, "date": date}],
+                "adults": adults,
+                "currency": currency,
             },
         )
-
         data = response.get("data") or []
         journeys = data[0].get("journeys", []) if data else []
 
@@ -1072,24 +1072,69 @@ class NuiteeFlightProvider:
             option = self._journey_to_option(journey)
             if not option:
                 continue
-            # Collapse identical itineraries (same carrier, price, times, stops)
-            # so each tier shows genuinely distinct flights.
+            # Collapse identical itineraries (same carrier, price, times, stops).
             signature = (
-                option["airline"],
-                option["price"],
-                option["departure_time"],
-                option["arrival_time"],
-                option["stops"],
+                option["airline"], option["price"], option["departure_time"],
+                option["arrival_time"], option["stops"],
             )
             if signature in seen:
                 continue
             seen.add(signature)
             options.append(option)
+        return options
 
-        if not options:
-            raise ValueError(
-                "No flight options were returned for this route and dates."
+    @staticmethod
+    def _combine_round_trips(
+        outbound: List[Dict[str, Any]], inbound: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Pair outbound + return legs into round-trip options with a combined price.
+
+        Both legs are sorted by price and paired in order (cheapest outbound with
+        cheapest return, etc.), so each result is a coherent round trip and the
+        price tiers reflect the full there-and-back cost.
+        """
+        out_sorted = sorted(outbound, key=lambda o: o["price"])
+        in_sorted = sorted(inbound, key=lambda o: o["price"])
+        combined: List[Dict[str, Any]] = []
+        for out, ret in zip(out_sorted, in_sorted):
+            combined.append({
+                **out,
+                "id": f"{out['id']}|{ret['id']}",
+                "price": round(out["price"] + ret["price"], 2),
+                "round_trip": True,
+                "outbound_price": out["price"],
+                "return_price": ret["price"],
+                "return_offer_id": ret["id"],
+                "return_airline": ret["airline"],
+                "return_stops": ret["stops"],
+                "return_duration_minutes": ret["duration_minutes"],
+                "return_departure_time": ret["departure_time"],
+                "return_arrival_time": ret["arrival_time"],
+                "return_origin": ret["origin"],
+                "return_destination": ret["destination"],
+            })
+        return combined
+
+    def search_options(self, input_data: FlightSearchInput) -> CategorizedFlightResult:
+        origin_code = self._resolve_airport(input_data.origin_city)
+        destination_code = self._resolve_airport(input_data.destination_city)
+
+        outbound = self._search_leg(
+            origin_code, destination_code, input_data.departure_date,
+            input_data.adults, input_data.currency,
+        )
+        if not outbound:
+            raise ValueError("No flight options were returned for this route and dates.")
+
+        options = outbound
+        if input_data.return_date:
+            inbound = self._search_leg(
+                destination_code, origin_code, input_data.return_date,
+                input_data.adults, input_data.currency,
             )
+            # Combine into round trips; if no returns came back, keep one-way.
+            if inbound:
+                options = self._combine_round_trips(outbound, inbound)
 
         return {
             "origin": origin_code,

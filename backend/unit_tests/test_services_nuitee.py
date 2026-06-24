@@ -150,19 +150,19 @@ def hotels_directory_payload():
 # ---------------------------------------------------------------------------
 
 class TestNuiteeFlightProvider:
-    def test_search_options_buckets_and_maps(self, flights_rates_payload, mocker):
+    def test_search_options_one_way(self, flights_rates_payload, mocker):
+        """No return date → a single leg search with one-way prices."""
         provider = NuiteeFlightProvider()
         mocker.patch.object(provider, "_resolve_airport", side_effect=["JFK", "FCO"])
-        mocker.patch.object(provider.client, "post", return_value=flights_rates_payload)
+        post = mocker.patch.object(provider.client, "post", return_value=flights_rates_payload)
 
         result = provider.search_options(
-            FlightSearchInput("New York", "Rome", "2026-09-10", "2026-09-13", 1, "USD")
+            FlightSearchInput("New York", "Rome", "2026-09-10", "", 1, "USD")
         )
 
+        assert post.call_count == 1  # only the outbound leg is searched
         assert result["origin"] == "JFK"
         assert result["destination"] == "FCO"
-        assert set(result["tiers"].keys()) == set(TIER_ORDER)
-        # Five usable, distinct offers (one duplicate + one zero-price dropped).
         flat = [o for tier in TIER_ORDER for o in result["tiers"][tier]]
         assert len(flat) == 4
         sample = result["tiers"]["cheapest"][0]
@@ -170,6 +170,28 @@ class TestNuiteeFlightProvider:
         assert sample["price"] == 437.75
         assert sample["stops"] == 1
         assert sample["origin"] == "JFK"
+        assert sample.get("round_trip") is not True
+
+    def test_search_options_round_trip_combines_legs(self, flights_rates_payload, mocker):
+        """A return date → two leg searches combined into round trips (summed price)."""
+        provider = NuiteeFlightProvider()
+        mocker.patch.object(provider, "_resolve_airport", side_effect=["JFK", "FCO"])
+        post = mocker.patch.object(provider.client, "post", return_value=flights_rates_payload)
+
+        result = provider.search_options(
+            FlightSearchInput("New York", "Rome", "2026-09-10", "2026-09-13", 1, "USD")
+        )
+
+        assert post.call_count == 2  # outbound + return legs
+        assert set(result["tiers"].keys()) == set(TIER_ORDER)
+        sample = result["tiers"]["cheapest"][0]
+        assert sample["round_trip"] is True
+        # Same mocked payload for both legs → combined price is double the one-way.
+        assert sample["price"] == 875.5
+        assert sample["outbound_price"] == 437.75
+        assert sample["return_price"] == 437.75
+        assert sample["return_airline"] == "TAP"
+        assert "|" in sample["id"]  # combined outbound|return offer id
 
     def test_search_options_raises_when_no_journeys(self, mocker):
         provider = NuiteeFlightProvider()

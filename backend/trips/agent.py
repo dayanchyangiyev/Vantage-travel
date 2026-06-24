@@ -354,7 +354,9 @@ def _tool_search_flights(context: Dict[str, Any], args: Dict[str, Any]) -> Dict[
         "options_by_tier": _summarize_options(
             result.get("tiers", {}),
             ["id", "airline", "price", "currency", "stops", "duration_minutes",
-             "departure_time", "arrival_time"],
+             "departure_time", "arrival_time", "round_trip", "outbound_price",
+             "return_price", "return_airline", "return_departure_time",
+             "return_arrival_time", "return_stops"],
         ),
     }
 

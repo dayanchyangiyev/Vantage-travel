@@ -16,11 +16,12 @@ import TripForm from "./components/TripForm";
 import Dashboard from "./components/Dashboard";
 import BookingSearch, { BookingTripContext } from "./components/BookingSearch";
 import Checkout from "./components/Checkout";
+import Bookings from "./components/Bookings";
 import Login from "./components/Login";
 import Register from "./components/Register";
 import { useAuth } from "./context/AuthContext";
 
-type Step = "landing" | "login" | "register" | "form" | "dashboard" | "flight-search" | "hotel-search" | "checkout";
+type Step = "landing" | "login" | "register" | "form" | "dashboard" | "flight-search" | "hotel-search" | "checkout" | "bookings";
 
 function splitDestination(destination: string): { city: string; country: string } {
   const parts = (destination || "").split(",").map((p) => p.trim()).filter(Boolean);
@@ -469,6 +470,7 @@ export default function App() {
               onOpenFlightSearch={() => setStep("flight-search")}
               onOpenHotelSearch={() => setStep("hotel-search")}
               onOpenCheckout={() => setStep("checkout")}
+              onOpenBookings={() => setStep("bookings")}
               onBack={() => setStep(isAuthenticated ? "landing" : "form")}
             />
           </motion.div>
@@ -508,8 +510,15 @@ export default function App() {
               selectedHotel={selectedHotel}
               customerEmail={user?.email}
               token={token}
+              onViewBookings={() => setStep("bookings")}
               onBack={() => setStep("dashboard")}
             />
+          </motion.div>
+        )}
+
+        {step === "bookings" && (
+          <motion.div key="bookings" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <Bookings token={token} onBack={() => setStep("dashboard")} />
           </motion.div>
         )}
       </AnimatePresence>

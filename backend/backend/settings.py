@@ -209,3 +209,12 @@ CODEX_TIMEOUT_SECONDS = config("CODEX_TIMEOUT_SECONDS", default=180, cast=int)
 # How many recent messages are sent verbatim each turn; older context is carried
 # by the session summary that the agent regenerates whenever a session ends.
 CODEX_HISTORY_WINDOW = config("CODEX_HISTORY_WINDOW", default=16, cast=int)
+
+# Customer support agent — Google Gemini API (weaker model, policy-gated ops).
+GEMINI_API_KEY = config("GEMINI_API_KEY", default="")
+GEMINI_MODEL = config("GEMINI_MODEL", default="gemini-2.5-flash-lite")
+GEMINI_BASE_URL = config(
+    "GEMINI_BASE_URL", default="https://generativelanguage.googleapis.com/v1beta"
+)
+GEMINI_TIMEOUT_SECONDS = config("GEMINI_TIMEOUT_SECONDS", default=60, cast=int)
+GEMINI_HISTORY_WINDOW = config("GEMINI_HISTORY_WINDOW", default=20, cast=int)

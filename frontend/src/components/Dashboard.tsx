@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import {
   ArrowLeft, MoreHorizontal, AlertTriangle, RefreshCw, Sun, Cloud, CloudRain, Droplets,
-  Plane, BedDouble, ChevronRight, Check, Lock,
+  Plane, BedDouble, ChevronRight, Check, Lock, Ticket,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { DynamicTierQuote, FlightOption, HotelOption, SavedTrip, TripPlan, WeatherSummary } from '../types/trip';
 import BookingSearch, { BookingTripContext } from './BookingSearch';
 import ChatPanel from './ChatPanel';
+import SupportWidget from './SupportWidget';
 import { ChatTripContext } from '../lib/chat';
 
 type TierKey = 'cheapest' | 'affordable' | 'moderate' | 'luxury';
@@ -228,6 +229,7 @@ export default function Dashboard({
   onOpenFlightSearch,
   onOpenHotelSearch,
   onOpenCheckout,
+  onOpenBookings,
   onBack,
   onLogin,
   onRegister,
@@ -251,6 +253,7 @@ export default function Dashboard({
   onOpenFlightSearch: () => void;
   onOpenHotelSearch: () => void;
   onOpenCheckout: () => void;
+  onOpenBookings: () => void;
   onBack: () => void;
   onLogin: () => void;
   onRegister: () => void;
@@ -303,6 +306,15 @@ export default function Dashboard({
         </button>
         <div className="text-[10px] uppercase tracking-[0.4em] font-bold text-zinc-950">Vantage / Exploration</div>
         <div className="flex items-center gap-6">
+          {isAuthenticated && (
+            <button
+              onClick={onOpenBookings}
+              className="flex items-center gap-2 text-xs uppercase tracking-widest font-medium text-zinc-500 hover:text-zinc-950 transition-colors"
+            >
+              <Ticket className="w-4 h-4" />
+              My Bookings
+            </button>
+          )}
           {!isAuthenticated && plan && (
             <div className="flex gap-4">
               <button
@@ -438,9 +450,15 @@ export default function Dashboard({
               {selectedFlight ? (
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="text-sm font-medium text-zinc-900">{selectedFlight.airline}</div>
+                    <div className="text-sm font-medium text-zinc-900">
+                      {selectedFlight.airline}
+                      <span className="ml-2 text-[9px] uppercase tracking-widest text-zinc-400">
+                        {selectedFlight.round_trip ? 'Round trip' : 'One way'}
+                      </span>
+                    </div>
                     <div className="text-[11px] text-zinc-400">
-                      {selectedFlight.origin}–{selectedFlight.destination} · {selectedFlight.stops <= 0 ? 'Direct' : `${selectedFlight.stops} stop(s)`}
+                      {selectedFlight.origin}–{selectedFlight.destination}
+                      {selectedFlight.round_trip ? ` ⇄ ${selectedFlight.return_destination}` : ''} · {selectedFlight.stops <= 0 ? 'Direct' : `${selectedFlight.stops} stop(s)`}
                     </div>
                   </div>
                   <div className="text-xl font-light flex items-center gap-2">
@@ -620,6 +638,9 @@ export default function Dashboard({
         isAuthenticated={isAuthenticated}
         onLogin={onLogin}
       />
+
+      {/* ── Floating customer-support widget — Gemini agent ── */}
+      <SupportWidget token={token} isAuthenticated={isAuthenticated} onLogin={onLogin} />
 
       <footer className="mt-48 pt-20 border-t border-zinc-100 flex justify-between items-center text-[10px] uppercase tracking-[0.3em] font-bold text-zinc-300">
         <div>© 2026 Vantage Travel</div>

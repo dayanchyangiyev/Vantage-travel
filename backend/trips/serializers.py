@@ -2,7 +2,10 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from .models import Booking, ChatMessage, ChatSession, Trip
+from .models import (
+    Booking, ChatMessage, ChatSession,
+    SupportMessage, SupportOperation, SupportSession, Trip,
+)
 from .services import VALID_COMFORT_TIERS
 
 
@@ -142,6 +145,47 @@ class BookingSerializer(serializers.ModelSerializer):
             "id", "kind", "offer_id", "reference", "supplier_reference", "status",
             "title", "price", "currency", "is_real", "created_at",
         )
+        read_only_fields = fields
+
+
+class SupportOperationSerializer(serializers.ModelSerializer):
+    booking_reference = serializers.CharField(source="booking.reference", read_only=True, default=None)
+
+    class Meta:
+        model = SupportOperation
+        fields = (
+            "id", "kind", "status", "reason", "policy_basis", "booking_reference",
+            "details", "before_state", "after_state", "created_at", "executed_at",
+        )
+        read_only_fields = fields
+
+
+class SupportMessageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SupportMessage
+        fields = ("id", "role", "content", "created_at")
+        read_only_fields = fields
+
+
+class SupportSessionSerializer(serializers.ModelSerializer):
+    messages = SupportMessageSerializer(many=True, read_only=True)
+    operations = SupportOperationSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = SupportSession
+        fields = (
+            "id", "status", "mode", "summary",
+            "created_at", "updated_at", "ended_at", "messages", "operations",
+        )
+        read_only_fields = fields
+
+
+class SupportSessionListSerializer(serializers.ModelSerializer):
+    message_count = serializers.IntegerField(source="messages.count", read_only=True)
+
+    class Meta:
+        model = SupportSession
+        fields = ("id", "status", "mode", "created_at", "updated_at", "message_count")
         read_only_fields = fields
 
 

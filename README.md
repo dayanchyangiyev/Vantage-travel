@@ -12,6 +12,45 @@ To ensure the project remains highly maintainable and scalable, the repository i
 - **`frontend/`**: Contains the user interface, routing, state management, and client-side API integrations. It is structured to separate visual components from external data fetching logic.
 - **`backend/`**: Acts as the central hub of the application. It handles database interactions, secure user authentication, complex external API orchestration, and all core business logic.
 
+## Setup & Installation
+After cloning the repository from GitHub, set up the three pieces below. The
+backend and frontend are required; the Codex CLI is required only for the AI
+travel concierge chat.
+
+**1. Backend (Django)**
+```bash
+cd backend
+python -m venv env && source env/bin/activate   # Windows: env\Scripts\activate
+pip install -r ../requirements.txt
+python manage.py migrate
+python manage.py runserver
+```
+
+**2. Frontend (React + Vite)**
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+**3. AI Concierge — OpenAI Codex CLI**
+The concierge shells out to the `codex` CLI, so it must be installed and
+authenticated once on the machine running the backend:
+```bash
+npm install -g @openai/codex      # portable (Linux/macOS/Windows)
+# or, on macOS:  brew install --cask codex
+codex login                       # one-time auth (ChatGPT account or API key)
+codex --version                   # verify
+```
+The auth token persists in `~/.codex/`, so this is a one-time step per machine.
+On startup the backend logs whether Codex is authenticated. If it is missing,
+the rest of the app still runs — only the AI chat returns an error. The binary
+path can be overridden with the `CODEX_BINARY` setting.
+
+Environment variables (API keys for flights/hotels, weather, etc.) go in a
+`.env` file at the repository root — see `backend/backend/settings.py` for the
+full list of `config(...)` keys.
+
 ## Technologies Used
 The application is built using a modern, robust technology stack tailored for speed and reliability:
 - **Frontend**: Developed with React 18 and TypeScript for strict type safety, built using the lightning-fast Vite bundler. Styling is handled with Tailwind CSS to keep the design system consistent, while Framer Motion is utilized to create smooth, elegant, and unobtrusive micro-animations.

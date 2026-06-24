@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   ArrowLeft, MoreHorizontal, AlertTriangle, RefreshCw, Sun, Cloud, CloudRain, Droplets,
-  Plane, BedDouble, ChevronRight, Check, Lock,
+  Plane, BedDouble, ChevronRight, Check, Lock, Ticket,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { DynamicTierQuote, FlightOption, HotelOption, SavedTrip, TripPlan, WeatherSummary } from '../types/trip';
@@ -228,6 +228,7 @@ export default function Dashboard({
   onOpenFlightSearch,
   onOpenHotelSearch,
   onOpenCheckout,
+  onOpenBookings,
   onBack,
   onLogin,
   onRegister,
@@ -251,6 +252,7 @@ export default function Dashboard({
   onOpenFlightSearch: () => void;
   onOpenHotelSearch: () => void;
   onOpenCheckout: () => void;
+  onOpenBookings: () => void;
   onBack: () => void;
   onLogin: () => void;
   onRegister: () => void;
@@ -303,6 +305,15 @@ export default function Dashboard({
         </button>
         <div className="text-[10px] uppercase tracking-[0.4em] font-bold text-zinc-950">Vantage / Exploration</div>
         <div className="flex items-center gap-6">
+          {isAuthenticated && (
+            <button
+              onClick={onOpenBookings}
+              className="flex items-center gap-2 text-xs uppercase tracking-widest font-medium text-zinc-500 hover:text-zinc-950 transition-colors"
+            >
+              <Ticket className="w-4 h-4" />
+              My Bookings
+            </button>
+          )}
           {!isAuthenticated && plan && (
             <div className="flex gap-4">
               <button

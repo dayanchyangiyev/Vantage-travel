@@ -176,11 +176,12 @@ interface CheckoutProps {
   selectedHotel: HotelOption | null;
   customerEmail?: string;
   token?: string | null;
+  onViewBookings?: () => void;
   onBack: () => void;
 }
 
 export default function Checkout({
-  trip, selectedFlight, selectedHotel, customerEmail, token, onBack,
+  trip, selectedFlight, selectedHotel, customerEmail, token, onViewBookings, onBack,
 }: CheckoutProps) {
   const [stage, setStage] = useState<Stage>('details');
   const [bookingRef, setBookingRef] = useState<string>('');
@@ -435,42 +436,79 @@ export default function Checkout({
                 ? 'You already booked this — we kept your original reference instead of charging again.'
                 : <>A confirmation has been sent to <span className="text-zinc-900">{email}</span>.</>}
             </p>
-            <div className="border border-zinc-200 text-left">
-              <div className="flex items-center justify-between px-5 py-4 bg-zinc-950 text-white">
-                <span className="text-[10px] uppercase tracking-[0.25em] font-bold text-zinc-300">Booking Reference</span>
-                <span className="text-lg font-medium tracking-widest tabular-nums">{bookingRef}</span>
-              </div>
-              <div className="px-5 py-4 space-y-2 text-sm">
-                <div className="flex justify-between"><span className="text-zinc-400">Status</span><span className="font-semibold text-emerald-600">{bookingStatus}</span></div>
-                <div className="flex justify-between"><span className="text-zinc-400">Lead traveler</span><span>{title} {firstName} {lastName}</span></div>
-                <div className="flex justify-between"><span className="text-zinc-400">Trip</span><span>{trip.destinationCity}, {trip.destinationCountry}</span></div>
-                <div className="flex justify-between"><span className="text-zinc-400">Dates</span><span>{trip.startDate} → {trip.endDate}</span></div>
-                {selectedFlight && <div className="flex justify-between"><span className="text-zinc-400">Flight</span><span>{selectedFlight.airline}</span></div>}
-                {selectedFlight && selectedHotel && flightRef && (
-                  <div className="flex justify-between"><span className="text-zinc-400">Flight reference</span><span className="tabular-nums">{flightRef}</span></div>
-                )}
-                {selectedHotel && <div className="flex justify-between"><span className="text-zinc-400">Hotel</span><span className="truncate ml-4">{selectedHotel.name}</span></div>}
-                {isRealBooking && hotelConfCode && (
-                  <div className="flex justify-between"><span className="text-zinc-400">Hotel confirmation</span><span className="tabular-nums">{hotelConfCode}</span></div>
-                )}
-                <div className="flex justify-between"><span className="text-zinc-400">Paid · {currency}</span><span className="font-semibold">{money(grandTotal)}</span></div>
-                <div className="flex justify-between"><span className="text-zinc-400">Card</span><span>{brand ? brand.toUpperCase() : 'CARD'} •••• {maskedCard}</span></div>
-              </div>
-              <div className="border-t border-zinc-100 px-5 py-3 flex items-center gap-2">
-                <ShieldCheck className={`w-3.5 h-3.5 ${isRealBooking ? 'text-emerald-600' : 'text-zinc-400'}`} />
-                <span className="text-[10px] text-zinc-400">
-                  {isRealBooking
-                    ? 'Confirmed with the supplier via Nuitee Connect (sandbox — no real charge).'
-                    : 'Demo reference — flight offers expire too quickly to hold a live booking.'}
-                </span>
+            {/* Per-item confirmations — each booked product gets its own ticket. */}
+            <div className="space-y-4">
+              {selectedFlight && (
+                <div className="border border-zinc-200 text-left">
+                  <div className="flex items-center justify-between bg-zinc-950 px-5 py-3 text-white">
+                    <span className="flex items-center gap-2 text-[10px] uppercase tracking-[0.25em] font-bold text-zinc-300">
+                      <Plane className="h-3.5 w-3.5" /> Flight Ticket
+                    </span>
+                    <span className="text-base font-medium tracking-widest tabular-nums">{flightRef}</span>
+                  </div>
+                  <div className="space-y-2 px-5 py-4 text-sm">
+                    <div className="flex justify-between"><span className="text-zinc-400">Airline</span><span>{selectedFlight.airline}</span></div>
+                    <div className="flex justify-between"><span className="text-zinc-400">Route</span><span>{selectedFlight.origin}–{selectedFlight.destination} · {selectedFlight.stops <= 0 ? 'Direct' : `${selectedFlight.stops} stop(s)`}</span></div>
+                    <div className="flex justify-between"><span className="text-zinc-400">Status</span><span className="font-semibold text-emerald-600">{bookingStatus}</span></div>
+                    <div className="flex justify-between"><span className="text-zinc-400">Fare</span><span className="tabular-nums">{money(flightTotal)}</span></div>
+                  </div>
+                  <div className="flex items-center gap-2 border-t border-zinc-100 px-5 py-2.5">
+                    <ShieldCheck className="h-3.5 w-3.5 text-zinc-400" />
+                    <span className="text-[10px] text-zinc-400">Demo ticket — flight offers expire too quickly to hold a live supplier booking.</span>
+                  </div>
+                </div>
+              )}
+
+              {selectedHotel && (
+                <div className="border border-zinc-200 text-left">
+                  <div className="flex items-center justify-between bg-zinc-950 px-5 py-3 text-white">
+                    <span className="flex items-center gap-2 text-[10px] uppercase tracking-[0.25em] font-bold text-zinc-300">
+                      <BedDouble className="h-3.5 w-3.5" /> Hotel Reservation
+                    </span>
+                    <span className="text-base font-medium tracking-widest tabular-nums">{bookingRef}</span>
+                  </div>
+                  <div className="space-y-2 px-5 py-4 text-sm">
+                    <div className="flex justify-between"><span className="text-zinc-400">Hotel</span><span className="ml-4 truncate">{selectedHotel.name}</span></div>
+                    <div className="flex justify-between"><span className="text-zinc-400">Stay</span><span>{selectedHotel.nights} night(s)</span></div>
+                    <div className="flex justify-between"><span className="text-zinc-400">Status</span><span className="font-semibold text-emerald-600">{bookingStatus}</span></div>
+                    {hotelConfCode && <div className="flex justify-between"><span className="text-zinc-400">Hotel confirmation</span><span className="tabular-nums">{hotelConfCode}</span></div>}
+                    <div className="flex justify-between"><span className="text-zinc-400">Total</span><span className="tabular-nums">{money(hotelTotal)}</span></div>
+                  </div>
+                  <div className="flex items-center gap-2 border-t border-zinc-100 px-5 py-2.5">
+                    <ShieldCheck className={`h-3.5 w-3.5 ${isRealBooking ? 'text-emerald-600' : 'text-zinc-400'}`} />
+                    <span className="text-[10px] text-zinc-400">Confirmed with the supplier via Nuitee Connect (sandbox — no real charge).</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Order-level summary */}
+              <div className="border border-zinc-200 text-left">
+                <div className="space-y-2 px-5 py-4 text-sm">
+                  <div className="flex justify-between"><span className="text-zinc-400">Lead traveler</span><span>{title} {firstName} {lastName}</span></div>
+                  <div className="flex justify-between"><span className="text-zinc-400">Trip</span><span>{trip.destinationCity}, {trip.destinationCountry}</span></div>
+                  <div className="flex justify-between"><span className="text-zinc-400">Dates</span><span>{trip.startDate} → {trip.endDate}</span></div>
+                  <div className="flex justify-between"><span className="text-zinc-400">Paid · {currency}</span><span className="font-semibold">{money(grandTotal)}</span></div>
+                  <div className="flex justify-between"><span className="text-zinc-400">Card</span><span>{brand ? brand.toUpperCase() : 'CARD'} •••• {maskedCard}</span></div>
+                </div>
               </div>
             </div>
-            <button
-              onClick={onBack}
-              className="mt-8 px-8 py-4 bg-zinc-950 text-white text-xs uppercase tracking-[0.3em] font-medium hover:bg-zinc-800 transition-colors"
-            >
-              Return to Dashboard
-            </button>
+
+            <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+              {onViewBookings && (
+                <button
+                  onClick={onViewBookings}
+                  className="px-8 py-4 bg-zinc-950 text-white text-xs uppercase tracking-[0.3em] font-medium hover:bg-zinc-800 transition-colors"
+                >
+                  View My Bookings
+                </button>
+              )}
+              <button
+                onClick={onBack}
+                className="px-8 py-4 border border-zinc-300 text-zinc-700 text-xs uppercase tracking-[0.3em] font-medium hover:border-zinc-950 hover:text-zinc-950 transition-colors"
+              >
+                Return to Dashboard
+              </button>
+            </div>
           </motion.div>
         ) : stage === 'processing' ? (
           /* ---------------- PROCESSING ---------------- */

@@ -1,3 +1,17 @@
+# ---------------------------------------------------------------------------
+# External (non-pip) requirement: OpenAI Codex CLI
+#
+# The AI travel concierge shells out to the `codex` CLI, so it must be installed
+# and authenticated on any machine running the backend:
+#
+#   npm install -g @openai/codex      # portable (Linux/macOS/Windows)
+#   # or, on macOS:  brew install --cask codex
+#   codex login                       # one-time auth (ChatGPT or API key)
+#
+# Verify with `codex --version`. Without it, only the AI chat is affected;
+# the rest of the app runs normally. Override the binary path with CODEX_BINARY.
+# ---------------------------------------------------------------------------
+
 asgiref==3.11.1
 Django==6.0.4
 django-cors-headers==4.9.0

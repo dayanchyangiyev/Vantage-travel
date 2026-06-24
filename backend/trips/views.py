@@ -14,7 +14,7 @@ from django.utils import timezone
 
 from .agent import AgentError, run_agent_turn, summarize_session
 from .booking import Holder, book_offer
-from .models import Booking, ChatSession, Trip
+from .models import Booking, ChatSession, SupportOperation, SupportSession, Trip
 from .serializers import (
     BookingCreateSerializer,
     BookingSerializer,
@@ -24,9 +24,14 @@ from .serializers import (
     ChatSessionSerializer,
     FlightSearchQuerySerializer,
     HotelSearchQuerySerializer,
+    SupportOperationSerializer,
+    SupportSessionListSerializer,
+    SupportSessionSerializer,
     TripSerializer,
     WeatherQuerySerializer,
 )
+from .support_agent import SupportAgentError, run_support_turn
+from .support_ops import decline_operation, execute_operation
 from .services import (
     DynamicPricingInput,
     FlightSearchInput,
@@ -424,3 +429,96 @@ def chat_end_session(request, pk):
     session.ended_at = timezone.now()
     session.save(update_fields=["summary", "status", "ended_at", "updated_at"])
     return Response(ChatSessionSerializer(session).data, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# Customer support — Gemini agent with policy-gated, audited operations
+# ---------------------------------------------------------------------------
+class SupportSessionListCreateView(generics.ListCreateAPIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get_queryset(self):
+        return SupportSession.objects.filter(user=self.request.user)
+
+    def get_serializer_class(self):
+        return SupportSessionListSerializer if self.request.method == "GET" else SupportSessionSerializer
+
+    def create(self, request, *args, **kwargs):
+        session = SupportSession.objects.create(user=request.user)
+        return Response(SupportSessionSerializer(session).data, status=status.HTTP_201_CREATED)
+
+
+class SupportSessionDetailView(generics.RetrieveAPIView):
+    serializer_class = SupportSessionSerializer
+    permission_classes = (IsAuthenticated,)
+
+    def get_queryset(self):
+        return SupportSession.objects.filter(user=self.request.user)
+
+
+def _get_owned_support_session(request, pk):
+    try:
+        return SupportSession.objects.get(pk=pk, user=request.user)
+    except SupportSession.DoesNotExist:
+        raise NotFound("Support session not found.")
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def support_send_message(request, pk):
+    """Send a message to the support agent; run a Gemini turn; return the session."""
+    session = _get_owned_support_session(request, pk)
+    content = (request.data.get("content") or "").strip()
+    if not content:
+        return Response({"detail": "Message content is required."},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        reply_text, pending_operation = run_support_turn(session, content)
+    except SupportAgentError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+
+    session.messages.create(role="user", content=content)
+    session.messages.create(role="assistant", content=reply_text)
+    if session.status == SupportSession.Status.ENDED:
+        session.status = SupportSession.Status.ACTIVE
+        session.ended_at = None
+    session.save()
+
+    session.refresh_from_db()
+    body = SupportSessionSerializer(session).data
+    body["pending_operation"] = (
+        SupportOperationSerializer(pending_operation).data if pending_operation else None
+    )
+    return Response(body, status=status.HTTP_200_OK)
+
+
+def _get_owned_operation(request, op_id):
+    try:
+        return SupportOperation.objects.get(pk=op_id, user=request.user)
+    except SupportOperation.DoesNotExist:
+        raise NotFound("Operation not found.")
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def support_confirm_operation(request, op_id):
+    """Execute a pending operation after the user confirms it (policy re-checked)."""
+    operation = _get_owned_operation(request, op_id)
+    result = execute_operation(operation)
+    operation.refresh_from_db()
+    body = SupportOperationSerializer(operation).data
+    body["result"] = result
+    return Response(body, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def support_decline_operation(request, op_id):
+    """Decline a pending operation — recorded, nothing is mutated."""
+    operation = _get_owned_operation(request, op_id)
+    result = decline_operation(operation)
+    operation.refresh_from_db()
+    body = SupportOperationSerializer(operation).data
+    body["result"] = result
+    return Response(body, status=status.HTTP_200_OK)

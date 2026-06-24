@@ -47,6 +47,7 @@ logs/api_responses/*
 !backend/databases/.gitkeep
 
 # Project Documentation / Reports
+BACKEND_EXPLAINED.md
 Phase2_Documentation.md
 Backend_Test_Report_Bucharest_Frankfurt.md
 Live_API_logic.md

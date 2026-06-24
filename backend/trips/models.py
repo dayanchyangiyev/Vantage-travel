@@ -150,12 +150,122 @@ class Booking(models.Model):
         ordering = ["-created_at", "-id"]
         constraints = [
             # One active booking per user per offer — the guard against re-booking.
+            # Cancelled/refunded bookings free the offer up to be booked again.
             models.UniqueConstraint(
                 fields=["user", "kind", "offer_id"],
-                condition=~Q(status="CANCELLED"),
+                condition=~Q(status__in=["CANCELLED", "REFUNDED"]),
                 name="unique_active_booking_per_offer",
             )
         ]
 
     def __str__(self):
         return f"{self.kind} booking {self.reference} for {self.user}"
+
+
+class SupportSession(models.Model):
+    """A customer-support conversation with the Gemini-backed support agent.
+
+    The session + its messages are the agent's working memory for the current
+    conversation. Operations it performs are recorded separately and permanently
+    in SupportOperation for audit.
+    """
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        ENDED = "ended", "Ended"
+
+    class Mode(models.TextChoices):
+        # Helpful assistant giving advice/recommendations (read-only).
+        ASSIST = "assist", "Assist"
+        # Escalated, can propose operations (refund/modify) for confirmation.
+        INDIVIDUAL = "individual", "Individual"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="support_sessions",
+    )
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.ACTIVE)
+    mode = models.CharField(max_length=12, choices=Mode.choices, default=Mode.ASSIST)
+    summary = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return f"SupportSession #{self.pk} ({self.mode}) for {self.user}"
+
+
+class SupportMessage(models.Model):
+    class Role(models.TextChoices):
+        USER = "user", "User"
+        ASSISTANT = "assistant", "Assistant"
+        SYSTEM = "system", "System"
+
+    session = models.ForeignKey(
+        SupportSession, on_delete=models.CASCADE, related_name="messages",
+    )
+    role = models.CharField(max_length=10, choices=Role.choices)
+    content = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+    def __str__(self):
+        return f"{self.role} support message in session #{self.session_id}"
+
+
+class SupportOperation(models.Model):
+    """Permanent audit record of a support operation (refund / modification).
+
+    The Gemini model only ever *proposes* operations; the backend validates
+    policy + ownership and executes. Every proposal and execution is recorded
+    here with before/after state so operations are traceable for the future.
+    """
+
+    class Kind(models.TextChoices):
+        REFUND = "refund", "Refund"
+        MODIFY = "modify", "Modify"
+
+    class Status(models.TextChoices):
+        AWAITING_CONFIRMATION = "awaiting_confirmation", "Awaiting confirmation"
+        EXECUTED = "executed", "Executed"
+        DENIED = "denied", "Denied by policy"
+        DECLINED = "declined", "Declined by user"
+        FAILED = "failed", "Failed"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="support_operations",
+    )
+    session = models.ForeignKey(
+        SupportSession, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="operations",
+    )
+    booking = models.ForeignKey(
+        Booking, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="support_operations",
+    )
+    kind = models.CharField(max_length=10, choices=Kind.choices)
+    status = models.CharField(
+        max_length=24, choices=Status.choices, default=Status.AWAITING_CONFIRMATION,
+    )
+    reason = models.TextField(blank=True, default="")
+    # The policy clause that permitted (or denied) the operation.
+    policy_basis = models.TextField(blank=True, default="")
+    details = models.JSONField(default=dict, blank=True)
+    before_state = models.JSONField(default=dict, blank=True)
+    after_state = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    executed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return f"{self.kind} operation #{self.pk} ({self.status}) for {self.user}"

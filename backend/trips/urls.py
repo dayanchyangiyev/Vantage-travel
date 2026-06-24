@@ -4,6 +4,8 @@ from .views import (
     ChatSessionDetailView,
     ChatSessionListCreateView,
     CurrentTripView,
+    SupportSessionDetailView,
+    SupportSessionListCreateView,
     TripDetailView,
     TripListCreateView,
     budget_country_tiers,
@@ -15,6 +17,9 @@ from .views import (
     geonames_search,
     hotel_booking,
     hotel_search,
+    support_confirm_operation,
+    support_decline_operation,
+    support_send_message,
 )
 
 urlpatterns = [
@@ -31,5 +36,10 @@ urlpatterns = [
     path("chat/sessions/<int:pk>/", ChatSessionDetailView.as_view(), name="chat-session-detail"),
     path("chat/sessions/<int:pk>/messages/", chat_send_message, name="chat-send-message"),
     path("chat/sessions/<int:pk>/end/", chat_end_session, name="chat-end-session"),
+    path("support/sessions/", SupportSessionListCreateView.as_view(), name="support-session-list"),
+    path("support/sessions/<int:pk>/", SupportSessionDetailView.as_view(), name="support-session-detail"),
+    path("support/sessions/<int:pk>/messages/", support_send_message, name="support-send-message"),
+    path("support/operations/<int:op_id>/confirm/", support_confirm_operation, name="support-confirm-op"),
+    path("support/operations/<int:op_id>/decline/", support_decline_operation, name="support-decline-op"),
     path("<int:pk>/", TripDetailView.as_view(), name="trip-detail"),
 ]

@@ -7,6 +7,7 @@ import { motion } from 'motion/react';
 import { DynamicTierQuote, FlightOption, HotelOption, SavedTrip, TripPlan, WeatherSummary } from '../types/trip';
 import BookingSearch, { BookingTripContext } from './BookingSearch';
 import ChatPanel from './ChatPanel';
+import SupportWidget from './SupportWidget';
 import { ChatTripContext } from '../lib/chat';
 
 type TierKey = 'cheapest' | 'affordable' | 'moderate' | 'luxury';
@@ -449,9 +450,15 @@ export default function Dashboard({
               {selectedFlight ? (
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="text-sm font-medium text-zinc-900">{selectedFlight.airline}</div>
+                    <div className="text-sm font-medium text-zinc-900">
+                      {selectedFlight.airline}
+                      <span className="ml-2 text-[9px] uppercase tracking-widest text-zinc-400">
+                        {selectedFlight.round_trip ? 'Round trip' : 'One way'}
+                      </span>
+                    </div>
                     <div className="text-[11px] text-zinc-400">
-                      {selectedFlight.origin}–{selectedFlight.destination} · {selectedFlight.stops <= 0 ? 'Direct' : `${selectedFlight.stops} stop(s)`}
+                      {selectedFlight.origin}–{selectedFlight.destination}
+                      {selectedFlight.round_trip ? ` ⇄ ${selectedFlight.return_destination}` : ''} · {selectedFlight.stops <= 0 ? 'Direct' : `${selectedFlight.stops} stop(s)`}
                     </div>
                   </div>
                   <div className="text-xl font-light flex items-center gap-2">
@@ -631,6 +638,9 @@ export default function Dashboard({
         isAuthenticated={isAuthenticated}
         onLogin={onLogin}
       />
+
+      {/* ── Floating customer-support widget — Gemini agent ── */}
+      <SupportWidget token={token} isAuthenticated={isAuthenticated} onLogin={onLogin} />
 
       <footer className="mt-48 pt-20 border-t border-zinc-100 flex justify-between items-center text-[10px] uppercase tracking-[0.3em] font-bold text-zinc-300">
         <div>© 2026 Vantage Travel</div>

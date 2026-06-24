@@ -47,6 +47,17 @@ On startup the backend logs whether Codex is authenticated. If it is missing,
 the rest of the app still runs — only the AI chat returns an error. The binary
 path can be overridden with the `CODEX_BINARY` setting.
 
+**4. Customer Support — Google Gemini API**
+The floating support agent (refunds, modifications, policy-gated help) uses the
+Gemini API over REST (no extra dependency). Add a key to `.env`:
+```
+GEMINI_API_KEY=your_google_ai_studio_key
+# optional overrides:
+GEMINI_MODEL=gemini-2.5-flash-lite
+```
+Get a key from Google AI Studio. Without it, the support widget returns a clear
+error but the rest of the app runs normally.
+
 Environment variables (API keys for flights/hotels, weather, etc.) go in a
 `.env` file at the repository root — see `backend/backend/settings.py` for the
 full list of `config(...)` keys.
